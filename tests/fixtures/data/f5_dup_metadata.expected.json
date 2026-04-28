@@ -1,0 +1,7 @@
+{
+  "fixture": "f5_dup_metadata",
+  "files": {
+    "/dup-test.txt": "9f166921f0c167484b80aa4e7d40531bcb1808e202f77f2e07d94d03c74fbb51",
+    "/sub/nested.txt": "09b2e5d4bed72a728beb80ae2c6f6b21ad40025e0a8e3162ff6afc8fee3af173"
+  }
+}

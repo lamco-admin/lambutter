@@ -1,0 +1,7 @@
+{
+  "fixture": "f3_single_zlib",
+  "files": {
+    "/big-zlib.bin": "d0209fe1f9a3482b1c1f7ca4fce2ae1de93475b7a3772b34afb611a689f700c2",
+    "/small-zlib.txt": "46df3d7b02cd6b5a4add7138fb26612f31d3381643a2db1e73a1d4b2a50b82af"
+  }
+}

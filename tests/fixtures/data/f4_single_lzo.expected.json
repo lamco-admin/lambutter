@@ -1,0 +1,7 @@
+{
+  "fixture": "f4_single_lzo",
+  "files": {
+    "/big-lzo.bin": "495e1c3e683e0ebaccb7057db060150c0e2124edfd5134d4a9f444410455b4c4",
+    "/small-lzo.txt": "c507ccff7a7c4620147b68ed10682d32bac3a4b6ab1a2b8643a5f533e7f61d40"
+  }
+}

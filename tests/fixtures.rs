@@ -108,6 +108,91 @@ fn f2_single_zstd_reads_known_files_through_decompression() {
 }
 
 #[test]
+fn f3_single_zlib_reads_known_files_through_decompression() {
+    let img = load_image("f3_single_zlib");
+    let expected = load_expected("f3_single_zlib");
+
+    let reader: &[u8] = &img;
+    let len = img.len() as u64;
+    let mut fs = Btrfs::open(reader, len).expect("open f3");
+
+    for (path, expected_sha) in &expected.files {
+        let p = Path::new(path.as_bytes()).expect("absolute path");
+        let bytes = fs.read_file(p).expect(&format!("read {path}"));
+        let got = sha256_hex(&bytes);
+        assert_eq!(
+            &got, expected_sha,
+            "fixture content sha256 differs for {path}"
+        );
+    }
+}
+
+#[test]
+#[cfg(feature = "lzo")]
+fn f4_single_lzo_reads_known_files_through_decompression() {
+    let img = load_image("f4_single_lzo");
+    let expected = load_expected("f4_single_lzo");
+
+    let reader: &[u8] = &img;
+    let len = img.len() as u64;
+    let mut fs = Btrfs::open(reader, len).expect("open f4");
+
+    for (path, expected_sha) in &expected.files {
+        let p = Path::new(path.as_bytes()).expect("absolute path");
+        let bytes = fs.read_file(p).expect(&format!("read {path}"));
+        let got = sha256_hex(&bytes);
+        assert_eq!(
+            &got, expected_sha,
+            "fixture content sha256 differs for {path}"
+        );
+    }
+}
+
+#[test]
+fn f5_dup_metadata_reads_files_under_dup_profile() {
+    // DUP-metadata + SINGLE-data is the mkfs.btrfs default for SSDs.
+    // Tests the chunk-tree resolver's pick_stripe path for DUP profile.
+    let img = load_image("f5_dup_metadata");
+    let expected = load_expected("f5_dup_metadata");
+
+    let reader: &[u8] = &img;
+    let len = img.len() as u64;
+    let mut fs = Btrfs::open(reader, len).expect("open f5");
+
+    for (path, expected_sha) in &expected.files {
+        let p = Path::new(path.as_bytes()).expect("absolute path");
+        let bytes = fs.read_file(p).expect(&format!("read {path}"));
+        let got = sha256_hex(&bytes);
+        assert_eq!(
+            &got, expected_sha,
+            "fixture content sha256 differs for {path}"
+        );
+    }
+}
+
+#[test]
+fn f8_sparse_no_holes_reads_with_zero_fill() {
+    // NO_HOLES filesystem with a sparse file: 4 KiB 'A', 1 MiB hole, 4 KiB 'B'.
+    // Tests file::read_file's gap-fill loop and EXTENT_DATA hole semantics.
+    let img = load_image("f8_sparse_no_holes");
+    let expected = load_expected("f8_sparse_no_holes");
+
+    let reader: &[u8] = &img;
+    let len = img.len() as u64;
+    let mut fs = Btrfs::open(reader, len).expect("open f8");
+
+    for (path, expected_sha) in &expected.files {
+        let p = Path::new(path.as_bytes()).expect("absolute path");
+        let bytes = fs.read_file(p).expect(&format!("read {path}"));
+        let got = sha256_hex(&bytes);
+        assert_eq!(
+            &got, expected_sha,
+            "fixture content sha256 differs for {path}"
+        );
+    }
+}
+
+#[test]
 fn f9_symlink_chain_resolves_targets() {
     let img = load_image("f9_symlink_chain");
     let expected = load_expected("f9_symlink_chain");
