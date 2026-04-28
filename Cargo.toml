@@ -1,0 +1,119 @@
+# Copyright 2025-2026 Lamco Development
+#
+# Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+# https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+# <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+# option. This file may not be copied, modified, or distributed
+# except according to those terms.
+
+[package]
+name = "lambutter"
+version = "0.1.0"
+edition = "2021"
+authors = [
+    "Greg Lamberson <greg@lamco.io>",
+    "Lamco Development <office@lamco.io>",
+]
+license = "MIT OR Apache-2.0"
+description = "no_std read-only btrfs reader for UEFI bootloaders and embedded contexts"
+repository = "https://github.com/lamco-admin/lambutter"
+homepage = "https://lamco.ai/products/lamboot/"
+documentation = "https://docs.rs/lambutter"
+readme = "README.md"
+keywords = ["btrfs", "filesystem", "no_std", "uefi", "bootloader"]
+categories = ["filesystem", "embedded", "no-std"]
+rust-version = "1.85"
+include = [
+    "src/**/*.rs",
+    "LICENSE-APACHE",
+    "LICENSE-MIT",
+    "README.md",
+]
+
+[features]
+default = ["zstd"]
+std = []
+zstd = ["dep:ruzstd"]
+zlib = ["dep:miniz_oxide"]
+lzo = []
+
+[dependencies]
+bitflags = { version = "2.6", default-features = false }
+crc = { version = "3.2", default-features = false }
+miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"], optional = true }
+ruzstd = { version = "0.7", default-features = false, optional = true }
+
+[dev-dependencies]
+anyhow = "1"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+# ---------------------------------------------------------------------------
+# Lints — per ~/lamco-admin/shared/integrated-development/templates/rust/cargo-lints.toml
+# ---------------------------------------------------------------------------
+
+[lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+elided_lifetimes_in_paths = "warn"
+unreachable_pub = "warn"
+
+[lints.clippy]
+pedantic = { priority = -1, level = "deny" }
+allow_attributes = "deny"
+
+# Selective allows for false-positive-prone pedantic lints
+missing_errors_doc = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+
+# Functional lints
+wildcard_imports = "deny"
+large_futures = "warn"
+
+# Progressive — start as "warn", upgrade to "deny" when codebase is clean
+unwrap_used = "warn"
+expect_used = "warn"
+
+# --- Project-specific allows ---
+# Lambutter parses on-disk binary structures: numeric casting between u8/u16/
+# u32/u64/usize is pervasive in any binary parser. Allow casting lints
+# project-wide rather than annotate every read site.
+cast_lossless = "allow"
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_sign_loss = "allow"
+
+# `similar_names` flags `idx`/`id` pairs which are unavoidable in btrfs
+# code (objectid vs. index keys are core concepts).
+similar_names = "allow"
+
+# Format-spec field names (e.g. `nbytes`, `nritems`) match upstream btrfs
+# struct field names exactly; they are not the package's choice to rename.
+unreadable_literal = "allow"
+
+# Doc strings cite spec sections, struct names, and constants verbatim;
+# requiring backticks on every term yields cluttered docs and provides no
+# value when the audit posture already requires spec citations.
+doc_markdown = "allow"
+
+# Some validators are clearer with `match` than `let-else`.
+manual_let_else = "allow"
+
+# Internal enums (e.g. CopyOutcome) carry parsed structs by value because
+# the parsed types are small and the enum is short-lived.
+large_enum_variant = "allow"
+
+# Explicit lifetime names on parser-helper functions document the borrow
+# graph; keeping them serves readability over terse elision.
+elidable_lifetime_names = "allow"
+
+# Numeric ops on parsed format fields are deliberate; wrapping is
+# expected behavior, not a bug to round-trip.
+cast_precision_loss = "allow"
+
+# `Result<T, Error>` is the dominant return type; wrapping in `must_use`
+# constraints is noise.
+result_large_err = "allow"
