@@ -1,0 +1,7 @@
+{
+  "fixture": "f2_single_zstd",
+  "files": {
+    "/big.bin": "b87f3e42c13a62bf2f7b9e018a1a69b2e8a9395474ce5e1ae4568d43b04cda20",
+    "/small.txt": "ba87aa64aa294fe45ac31c2f7aae661b5d12ac3a3b462b22c606edb03391df37"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "fixture": "f1_single_uncompressed",
+  "files": {
+    "/hello.txt": "6553057e23fd64ca53e7506d6b87323ddc347cf5e529967671d8b54a6b76d2a4",
+    "/dir-a/nested.txt": "dd1c2c1b4dd93d70a1ce50d40900438d2fd0067e9b16d9dcd754fffc0d2c3b94"
+  }
+}

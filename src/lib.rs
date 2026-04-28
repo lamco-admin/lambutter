@@ -142,6 +142,20 @@ impl<R: BlockRead> Btrfs<R> {
         )
     }
 
+    /// Read the target of the symlink at `path`. Errors if the path doesn't
+    /// resolve or doesn't point to a symlink. Returns the target as raw
+    /// bytes; callers handle UTF-8 decoding and relative/absolute resolution.
+    pub fn read_link(&mut self, path: Path<'_>) -> Result<Vec<u8>> {
+        let inode = self.resolve(path)?;
+        file::read_link(
+            &mut self.reader,
+            &self.chunk_map,
+            self.nodesize,
+            self.fs_tree_root,
+            inode.objectid,
+        )
+    }
+
     /// Iterate the entries of the directory at `path`.
     pub fn read_dir(&mut self, path: Path<'_>) -> Result<Vec<DirEntry>> {
         let inode = self.resolve(path)?;

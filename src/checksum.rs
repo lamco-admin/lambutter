@@ -26,14 +26,46 @@ pub(crate) fn crc32c(data: &[u8]) -> u32 {
     CRC32C.checksum(data)
 }
 
-/// Compute CRC32C with a non-default initial value. btrfs name-hashing uses
-/// `seed = 0xFFFF_FFFE` per the format spec; the conventional `crc32c(name)`
-/// will NOT find the right DIR_ITEM.
-/// spec: BTRFS-FORMAT-READONLY-REFERENCE §7
+/// Compute btrfs's name-hash: a CRC32C variant with the seed loaded directly
+/// into the running register (no implicit reflection by the algorithm
+/// driver) and no final XOR. This is the form documented in
+/// BTRFS-FORMAT-READONLY-REFERENCE §7 and used in the kernel's
+/// `btrfs_name_hash` and python-btrfs's `name_hash`. Verified against the
+/// `mkfs.btrfs --rootdir` output for fixture F1: hello.txt -> 0x415FEB59.
+///
+/// The reflected-form Castagnoli table is generated at compile time. We
+/// don't reuse the `crc` crate here because its `digest_with_initial`
+/// reflects the seed when `refin=true`, which silently changes the
+/// running-register state and produces a different hash than the kernel.
 pub(crate) fn crc32c_with_seed(seed: u32, data: &[u8]) -> u32 {
-    let mut digest = CRC32C.digest_with_initial(seed);
-    digest.update(data);
-    digest.finalize()
+    let mut crc = seed;
+    for &b in data {
+        crc = NAME_HASH_TABLE[((crc ^ u32::from(b)) & 0xFF) as usize] ^ (crc >> 8);
+    }
+    crc
+}
+
+/// Reflected Castagnoli CRC32C lookup table (poly 0x82F63B78).
+const NAME_HASH_TABLE: [u32; 256] = generate_name_hash_table();
+
+const fn generate_name_hash_table() -> [u32; 256] {
+    let mut table = [0u32; 256];
+    let mut n = 0u32;
+    while n < 256 {
+        let mut c = n;
+        let mut k = 0;
+        while k < 8 {
+            if c & 1 != 0 {
+                c = (c >> 1) ^ 0x82F6_3B78;
+            } else {
+                c >>= 1;
+            }
+            k += 1;
+        }
+        table[n as usize] = c;
+        n += 1;
+    }
+    table
 }
 
 /// Verify a btrfs csum field against a body slice. Returns `true` when the
@@ -63,8 +95,18 @@ mod tests {
     }
 
     #[test]
+    fn name_hash_matches_btrfs_kernel_output() {
+        // Verified against `mkfs.btrfs --rootdir`-produced fixture F1:
+        // dump-tree -t fs reports DIR_ITEM offsets matching these hashes.
+        assert_eq!(crc32c_with_seed(0xFFFF_FFFE, b"hello.txt"), 0x415F_EB59);
+        assert_eq!(crc32c_with_seed(0xFFFF_FFFE, b"dir-a"), 0x2C54_9827);
+        assert_eq!(crc32c_with_seed(0xFFFF_FFFE, b"nested.txt"), 0x86F5_F6F8);
+    }
+
+    #[test]
     fn name_hash_uses_seed() {
-        // Verify the seeded variant differs from the seed-0 variant.
+        // Standard crc32c(seed=0) yields a different result than the
+        // btrfs-specific seed=0xFFFFFFFE used for name hashing.
         let a = crc32c(b"default");
         let b = crc32c_with_seed(0xFFFF_FFFE, b"default");
         assert_ne!(a, b, "name-hash seed must change the result");

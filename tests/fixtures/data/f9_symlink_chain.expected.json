@@ -1,0 +1,10 @@
+{
+  "fixture": "f9_symlink_chain",
+  "files": {
+    "/target.txt": "7eedf5950878ea4011d4ac4295a596aee146b1dad3ceedc412b43b22dedf0391"
+  },
+  "symlinks": {
+    "/link-relative": "target.txt",
+    "/link-absolute": "/target.txt"
+  }
+}
