@@ -1,0 +1,51 @@
+[package]
+name = "lambutter-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+authors = [
+    "Greg Lamberson <greg@lamco.io>",
+    "Lamco Development <office@lamco.io>",
+]
+license = "MIT OR Apache-2.0"
+
+# Standalone workspace so cargo-fuzz's nightly + libfuzzer-sys do not
+# contaminate the main lambutter package's stable build.
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+lambutter = { path = "..", features = ["zstd", "zlib", "lzo", "std"] }
+
+[[bin]]
+name = "fuzz_superblock"
+path = "fuzz_targets/fuzz_superblock.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_btree_node"
+path = "fuzz_targets/fuzz_btree_node.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_extent_data"
+path = "fuzz_targets/fuzz_extent_data.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_dir_item"
+path = "fuzz_targets/fuzz_dir_item.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_compressed_extent"
+path = "fuzz_targets/fuzz_compressed_extent.rs"
+test = false
+doc = false

@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Integrated Development Framework — pre-commit hook for Rust projects
+# Copy to .githooks/pre-commit and chmod +x
+#
+# Design decisions:
+#
+# 1. Uses `rustup run nightly cargo fmt` because .rustfmt.toml uses
+#    nightly-only options (imports_granularity, group_imports). Stable
+#    rustfmt ignores these settings, so format checking would miss
+#    import ordering violations.
+#
+# 2. Uses `cargo clippy` without `-- -D warnings` because lint severity
+#    levels are configured in Cargo.toml. Adding -D warnings would
+#    promote progressive "warn" lints (e.g., unwrap_used) to errors,
+#    breaking the intentional warn→deny upgrade path. Cargo.toml is
+#    the single source of truth for lint levels.
+#
+# 3. Runs `cargo test --lib` for unit tests only (not integration
+#    tests or doc tests) to keep commit-time feedback fast.
+
+set -e
+
+echo "pre-commit: checking format..."
+rustup run nightly cargo fmt --check
+
+echo "pre-commit: running clippy..."
+cargo clippy
+
+echo "pre-commit: running tests..."
+cargo test --lib
+
+echo "pre-commit: all checks passed"
