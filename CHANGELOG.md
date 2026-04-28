@@ -5,6 +5,66 @@ Keep a Changelog; semantic versioning is loose during pre-1.0.
 
 ## [Unreleased]
 
+## [0.1.1]
+
+Filling the v0.1.0 deferred-list per
+`docs/TESTING-AND-FUZZING-PLAN.md` §9.
+
+### Added
+
+- LZO decompression (real, not just outer-wrapper): `comp_lzo` extents
+  now decode correctly through `lzokay` v2.0.1 (MIT, no_std, pure
+  Rust). Verified against fixture F4 produced by `mkfs.btrfs --rootdir`
+  + `mount -o compress-force=lzo`.
+- Fixtures F3 (zlib), F4 (LZO), F5 (DUP metadata + SINGLE data — the
+  mkfs.btrfs default for SSDs), F8 (NO_HOLES sparse file with a 1 MiB
+  hole between two extents). All committed at `tests/fixtures/data/`
+  with their `.expected.json` and `.sha256` companions.
+- Fixture-test harness now exercises 8 scenarios (was 4 in v0.1.0).
+  Coverage matrix:
+  - F1: SINGLE uncompressed
+  - F2: SINGLE zstd
+  - F3: SINGLE zlib
+  - F4: SINGLE LZO
+  - F5: DUP metadata + SINGLE data
+  - F8: NO_HOLES sparse file
+  - F9: symlinks (relative + absolute)
+  - random-bytes-doesn't-panic smoke
+
+### Fixed
+
+- (Already fixed in 0.1.0 release branch but documented here for the
+  ledger) DIR_ITEM name-hash bug: the `crc` crate's
+  `digest_with_initial(seed)` reflects the seed when `refin=true`, so
+  passing 0xFFFFFFFE did NOT load that value into the running register.
+  Replaced with a direct table-driven implementation matching
+  python-btrfs and the kernel's `btrfs_name_hash` byte-for-byte.
+- (Same status) zstd trailing-padding handling. btrfs zstd extents are
+  sector-padded with zeros past the last frame; the decoder now checks
+  the zstd frame magic before each iteration and stops when absent.
+
+### Changed
+
+- `compression/lzo.rs` now dispatches sector payloads through
+  `lzokay::decompress::decompress`. The outer btrfs sector wrapper
+  parser is unchanged.
+
+### Dependencies
+
+- Added `lzokay = { version = "2.0", default-features = false,
+  features = ["decompress", "alloc"], optional = true }`. Feature
+  `lzo` now activates this dependency. Total compression-decoder
+  posture: ruzstd (zstd, default), miniz_oxide (zlib), lzokay (LZO) —
+  three pure-Rust no_std decoders, each gated behind its own feature.
+
+### Test totals
+
+- 36 host unit tests (unchanged)
+- 8 fixture-based oracle tests (was 4)
+- 5 fuzz harnesses (unchanged)
+
+
+
 ### Added — initial implementation (M2 through M10 of `docs/SPEC-LAMBUTTER.md`)
 
 - Superblock loader + validator. Reads all four canonical superblock
