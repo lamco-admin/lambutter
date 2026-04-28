@@ -62,6 +62,64 @@ pub(crate) fn read_metadata<R: BlockRead>(
     })
 }
 
+/// Read a symlink's target. Symlink targets in btrfs live as inline data
+/// in a single EXTENT_DATA item attached to the symlink's inode (per
+/// BTRFS-FORMAT-READONLY-REFERENCE §8). Returns the target path bytes
+/// without any modification — callers handle relative-vs-absolute and any
+/// recursive resolution.
+pub(crate) fn read_link<R: BlockRead>(
+    reader: &mut R,
+    chunk_map: &ChunkMap,
+    nodesize: u32,
+    fs_tree_root: u64,
+    objectid: u64,
+) -> Result<Vec<u8>> {
+    let metadata = read_metadata(reader, chunk_map, nodesize, fs_tree_root, objectid)?;
+    if !metadata.is_symlink() {
+        return Err(Error::NotASymlink);
+    }
+    let target = DiskKey {
+        objectid,
+        item_type: EXTENT_DATA_KEY,
+        offset: 0,
+    };
+    let (leaf, idx) = find_first_ge(reader, chunk_map, nodesize, fs_tree_root, &target)?
+        .ok_or(Error::NotFound)?;
+    let item = leaf.leaf_item(idx)?;
+    if item.key.objectid != objectid || item.key.item_type != EXTENT_DATA_KEY {
+        return Err(Error::CorruptBtree {
+            token: "symlink_no_extent_data",
+            logical: leaf.header.bytenr,
+        });
+    }
+    let data = leaf.leaf_item_data(item)?;
+    let header = ExtentDataHeader::parse(data, 0).ok_or(Error::CorruptBtree {
+        token: "extent_header_short",
+        logical: leaf.header.bytenr,
+    })?;
+    if header.ty != FILE_EXTENT_INLINE {
+        // Symlinks longer than fits inline are extremely rare but legal;
+        // surface a typed error rather than silently truncate.
+        return Err(Error::CorruptBtree {
+            token: "symlink_not_inline",
+            logical: leaf.header.bytenr,
+        });
+    }
+    let payload = &data[ExtentDataHeader::SIZE..];
+    let mut out = Vec::new();
+    if header.compression == COMPRESS_NONE {
+        out.extend_from_slice(payload);
+    } else {
+        compression::decode(header.compression, payload, &mut out)?;
+    }
+    // Use the symlink inode's `size` field as the canonical length;
+    // the inline-extent payload may be padded out to the leaf-item
+    // size with NULs that aren't part of the link target.
+    let target_len = (metadata.size as usize).min(out.len());
+    out.truncate(target_len);
+    Ok(out)
+}
+
 /// Read a file's full contents. Walks all EXTENT_DATA items for the inode,
 /// fetches their backing extents (resolving compressed extents through the
 /// compression dispatcher), and assembles the result into a byte vector.

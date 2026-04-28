@@ -20,9 +20,31 @@ use ruzstd::{io::Read, StreamingDecoder};
 use super::MAX_DECOMPRESSED_EXTENT_BYTES;
 use crate::error::{Error, Result};
 
+/// Magic bytes (little-endian u32) for the zstandard frame format.
+/// btrfs may emit multiple back-to-back frames per extent (compress block
+/// = filesystem block size); the on-disk slice we receive is sized to the
+/// extent's `disk_num_bytes`, which includes alignment padding past the
+/// last real frame.
+const ZSTD_FRAME_MAGIC: u32 = 0xFD2F_B528;
+
 pub(super) fn decode(src: &[u8], dst: &mut Vec<u8>) -> Result<()> {
     let mut input = src;
-    while !input.is_empty() {
+    loop {
+        // Stop when the remaining bytes are alignment padding rather than
+        // another zstd frame. Without this guard ruzstd would surface a
+        // bad-magic error for the trailing zeros and we'd misreport the
+        // extent as malformed.
+        if input.len() < 4 {
+            return Ok(());
+        }
+        let magic = u32::from_le_bytes([input[0], input[1], input[2], input[3]]);
+        if magic != ZSTD_FRAME_MAGIC {
+            // Skippable-frame magics (0x184D2A50..0x184D2A5F) are also
+            // legal zstd, but btrfs does not emit them; treat anything
+            // non-frame as the end of payload.
+            return Ok(());
+        }
+
         let mut decoder = StreamingDecoder::new(&mut input).map_err(|_| Error::BadCompression {
             algorithm: "comp_zstd",
         })?;
@@ -42,7 +64,6 @@ pub(super) fn decode(src: &[u8], dst: &mut Vec<u8>) -> Result<()> {
             dst.extend_from_slice(&buf[..n]);
         }
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -50,12 +71,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn round_trip_empty() {
-        // The smallest valid zstd payload (empty frame) was harder to hand-
-        // construct; instead this test ensures the decoder rejects an
-        // obviously bogus prefix without panicking.
+    fn non_zstd_prefix_terminates_cleanly() {
+        // btrfs zstd extents are sector-padded with zeros past the last
+        // frame. The decoder's outer loop must treat a non-frame-magic
+        // run as end-of-payload (returns Ok with whatever it already
+        // decoded), not as a corruption error. Bogus zeros at the start
+        // are equivalent: empty output, no error.
         let mut dst = Vec::new();
         let result = decode(b"\x00\x00\x00\x00", &mut dst);
-        assert!(result.is_err());
+        assert!(result.is_ok());
+        assert!(dst.is_empty());
+    }
+
+    #[test]
+    fn malformed_zstd_frame_returns_bad_compression() {
+        // A buffer that starts with the zstd magic but has a malformed
+        // body must surface BadCompression, not silently truncate.
+        use alloc::vec;
+        let mut dst = Vec::new();
+        let mut bogus = vec![0u8; 64];
+        bogus[0..4].copy_from_slice(&0xFD2F_B528u32.to_le_bytes());
+        let result = decode(&bogus, &mut dst);
+        assert!(matches!(
+            result,
+            Err(crate::error::Error::BadCompression {
+                algorithm: "comp_zstd"
+            })
+        ));
     }
 }
