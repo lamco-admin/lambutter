@@ -9,6 +9,20 @@
 //! On-disk-format constants. Names mirror upstream `btrfs_tree.h` so spec
 //! audits against the format reference (`~/lamboot-dev/docs/analysis/
 //! BTRFS-FORMAT-READONLY-REFERENCE-2026-04-27.md`) are mechanical.
+//!
+//! Many constants are deliberately defined even when v0.1.x has no read path
+//! that consumes them. They exist so that the format-reference audit posture
+//! (every spec section pointed back to a Rust constant) holds, and so that
+//! future scope expansions (snapshot enumeration, XATTRs, CSUM_TREE) start
+//! from a single source of truth rather than re-defining names. The module-
+//! level `#[expect(dead_code)]` documents this contract.
+
+#![expect(
+    dead_code,
+    reason = "format-reference completeness: constants and offsets are defined for the full \
+              on-disk format so that audit citations resolve, even when the read-only path \
+              has no caller for a given item type / offset in v0.1.x"
+)]
 
 // ---------------------------------------------------------------------------
 // Magic + superblock locations

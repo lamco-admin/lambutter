@@ -44,8 +44,23 @@ pub(crate) struct ChunkMapping {
     pub(crate) logical: u64,
     pub(crate) length: u64,
     pub(crate) ty: u64,
+    /// Stripe length in bytes. Only used by RAID0/10/5/6 (rejected) for
+    /// per-stripe addressing; retained on the mapping so the field-by-field
+    /// correspondence with `btrfs_chunk` is preserved.
+    #[expect(
+        dead_code,
+        reason = "RAID0/10/5/6-only field; profiles rejected in v0.1.x"
+    )]
     pub(crate) stripe_len: u64,
+    /// Number of stripes. Used for mirror profiles' parsing; the read path
+    /// always picks the first stripe so this is informational.
+    #[expect(
+        dead_code,
+        reason = "informational; pick_stripe always selects the first"
+    )]
     pub(crate) num_stripes: u16,
+    /// Sub-stripes (RAID10 sub-stripe count). RAID10 is rejected.
+    #[expect(dead_code, reason = "RAID10-only field; profile rejected in v0.1.x")]
     pub(crate) sub_stripes: u16,
     pub(crate) stripes: Vec<Stripe>,
 }
@@ -59,22 +74,15 @@ impl ChunkMapping {
     /// this is the only stripe; for mirror profiles (RAID1/RAID1C3/RAID1C4/
     /// DUP) any stripe is equivalent and we pick the first.
     fn pick_stripe(&self) -> Result<&Stripe> {
-        let profile = self.profile();
-        let token = match profile {
-            0 => "single", // SINGLE has no profile bit set
-            BLOCK_GROUP_DUP => "dup",
-            BLOCK_GROUP_RAID1 => "raid1",
-            BLOCK_GROUP_RAID1C3 => "raid1c3",
-            BLOCK_GROUP_RAID1C4 => "raid1c4",
+        match self.profile() {
+            0 | BLOCK_GROUP_DUP | BLOCK_GROUP_RAID1 | BLOCK_GROUP_RAID1C3 | BLOCK_GROUP_RAID1C4 => {
+            }
             BLOCK_GROUP_RAID0 => return Err(Error::UnsupportedProfile("prof_raid0")),
             BLOCK_GROUP_RAID10 => return Err(Error::UnsupportedProfile("prof_raid10")),
             BLOCK_GROUP_RAID5 => return Err(Error::UnsupportedProfile("prof_raid5")),
             BLOCK_GROUP_RAID6 => return Err(Error::UnsupportedProfile("prof_raid6")),
             _ => return Err(Error::UnsupportedProfile("prof_unknown")),
-        };
-        let _ = token; // The token is currently only used at the error site,
-                       // but we keep the match exhaustive for future logging.
-
+        }
         self.stripes
             .first()
             .ok_or(Error::UnsupportedProfile("prof_no_stripes"))
@@ -91,10 +99,6 @@ pub(crate) struct ChunkMap {
 }
 
 impl ChunkMap {
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
     /// Parse a packed system chunk array (the `sys_chunk_array` field of the
     /// superblock). The array layout is a sequence of `(disk_key, chunk_item,
     /// stripes...)` tuples. The chunk_item's `num_stripes` determines how
@@ -153,21 +157,35 @@ impl ChunkMap {
     }
 
     /// Insert a mapping. Maintains sorted order by `logical`. Overlapping
-    /// regions are rejected with a typed error.
+    /// regions are rejected with a typed error. Addition is checked so that
+    /// a malformed `length` (e.g. `u64::MAX`) cannot wrap past the prev/next
+    /// bound check.
     pub(crate) fn insert(&mut self, mapping: ChunkMapping) -> Result<()> {
         let pos = self
             .mappings
             .partition_point(|m| m.logical < mapping.logical);
         if let Some(prev) = pos.checked_sub(1).and_then(|i| self.mappings.get(i)) {
-            if prev.logical + prev.length > mapping.logical {
+            let prev_end = prev.logical.checked_add(prev.length).ok_or({
+                Error::CorruptBtree {
+                    token: "chunk_overflow",
+                    logical: prev.logical,
+                }
+            })?;
+            if prev_end > mapping.logical {
                 return Err(Error::CorruptBtree {
                     token: "chunk_overlap",
                     logical: mapping.logical,
                 });
             }
         }
+        let new_end = mapping.logical.checked_add(mapping.length).ok_or({
+            Error::CorruptBtree {
+                token: "chunk_overflow",
+                logical: mapping.logical,
+            }
+        })?;
         if let Some(next) = self.mappings.get(pos) {
-            if mapping.logical + mapping.length > next.logical {
+            if new_end > next.logical {
                 return Err(Error::CorruptBtree {
                     token: "chunk_overlap",
                     logical: mapping.logical,
@@ -191,7 +209,13 @@ impl ChunkMap {
                 logical,
             })?;
 
-        if logical >= mapping.logical + mapping.length {
+        let mapping_end = mapping.logical.checked_add(mapping.length).ok_or({
+            Error::CorruptBtree {
+                token: "chunk_overflow",
+                logical: mapping.logical,
+            }
+        })?;
+        if logical >= mapping_end {
             return Err(Error::CorruptBtree {
                 token: "chunk_unmapped",
                 logical,
@@ -217,10 +241,6 @@ impl ChunkMap {
             physical,
             contiguous_bytes: bytes_remaining,
         })
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.mappings.len()
     }
 }
 
@@ -322,6 +342,17 @@ impl ChunkMap {
 /// The result of resolving a logical bytenr.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Resolved {
+    /// Device ID the stripe lives on. v0.1.x supports single-device read
+    /// paths only — `devid` is recorded for diagnostic / future multi-device
+    /// dispatch but not consulted in the current read path. (Test builds
+    /// read it; non-test builds don't.)
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "single-device only in v0.1.x; multi-device dispatch is a v0.2.0+ scope item"
+        )
+    )]
     pub(crate) devid: u64,
     pub(crate) physical: u64,
     /// Bytes contiguously available at `physical` before crossing into a
@@ -332,6 +363,8 @@ pub(crate) struct Resolved {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec;
+
     use super::*;
     use crate::format::constants::UUID_LEN;
 
@@ -371,11 +404,11 @@ mod tests {
     #[test]
     fn parse_sys_chunk_array_single_chunk() {
         let entry = build_sys_chunk_entry(0x0010_0000, 0x10_0000, 1, &[(1, 0x0010_0000)]);
-        let mut map = ChunkMap::new();
+        let mut map = ChunkMap::default();
         let mut padded = entry.clone();
         padded.resize(2048, 0);
         map.parse_system_chunk_array(&padded, entry.len()).unwrap();
-        assert_eq!(map.len(), 1);
+        assert_eq!(map.mappings.len(), 1);
         let r = map.resolve(0x0010_1234).unwrap();
         assert_eq!(r.devid, 1);
         assert_eq!(r.physical, 0x0010_1234);
@@ -384,7 +417,7 @@ mod tests {
     #[test]
     fn resolve_outside_any_chunk_errors() {
         let entry = build_sys_chunk_entry(0x0010_0000, 0x10_0000, 1, &[(1, 0x0010_0000)]);
-        let mut map = ChunkMap::new();
+        let mut map = ChunkMap::default();
         let mut padded = entry.clone();
         padded.resize(2048, 0);
         map.parse_system_chunk_array(&padded, entry.len()).unwrap();
@@ -403,6 +436,64 @@ mod tests {
             map.resolve(0x0020_0000),
             Err(Error::CorruptBtree {
                 token: "chunk_unmapped",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn insert_rejects_length_overflow() {
+        // A chunk with length = u64::MAX - logical + 1 would wrap on
+        // unchecked addition; the insert() guard must surface a typed
+        // chunk_overflow error instead of accepting the mapping.
+        let mut map = ChunkMap::default();
+        let bad = ChunkMapping {
+            logical: 1,
+            length: u64::MAX,
+            ty: 0,
+            stripe_len: 65536,
+            num_stripes: 1,
+            sub_stripes: 0,
+            stripes: vec![Stripe {
+                devid: 1,
+                offset: 0,
+                dev_uuid: [0; 16],
+            }],
+        };
+        assert!(matches!(
+            map.insert(bad),
+            Err(Error::CorruptBtree {
+                token: "chunk_overflow",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn resolve_rejects_mapping_overflow() {
+        // Build a mapping whose logical + length would wrap; resolve()
+        // must surface chunk_overflow rather than incorrectly reporting
+        // the byte as in-range.
+        let mut map = ChunkMap::default();
+        // Use insert direct to bypass the insert overflow guard so we
+        // can land a malformed mapping in the map for resolve() to see.
+        map.mappings.push(ChunkMapping {
+            logical: u64::MAX - 100,
+            length: 1000, // wraps past u64::MAX
+            ty: 0,
+            stripe_len: 65536,
+            num_stripes: 1,
+            sub_stripes: 0,
+            stripes: vec![Stripe {
+                devid: 1,
+                offset: 0,
+                dev_uuid: [0; 16],
+            }],
+        });
+        assert!(matches!(
+            map.resolve(u64::MAX - 50),
+            Err(Error::CorruptBtree {
+                token: "chunk_overflow",
                 ..
             })
         ));
@@ -430,7 +521,7 @@ mod tests {
             out.extend_from_slice(&[0u8; UUID_LEN]);
         }
 
-        let mut map = ChunkMap::new();
+        let mut map = ChunkMap::default();
         let used = out.len();
         out.resize(2048, 0);
         map.parse_system_chunk_array(&out, used).unwrap();

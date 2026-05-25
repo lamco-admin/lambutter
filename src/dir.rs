@@ -36,10 +36,10 @@ pub struct DirEntry {
     pub kind_byte: u8,
 }
 
-/// Iterate the directory's children. Each entry is fetched on demand.
-/// Lambutter does not paginate across leaves in v0.1.0; for very large
-/// directories (more than ~256 entries) the caller should expect some
-/// repeated tree-walks as iteration crosses leaf boundaries.
+/// Iterate the directory's children. Crossing a leaf boundary re-descends
+/// from the FS-tree root with the next key after the last seen one; the
+/// per-leaf cost is O(depth log n), negligible for /boot trees (depth 1-3,
+/// ~200-300 items per 16 KiB leaf).
 pub(crate) fn read_dir<R: BlockRead>(
     reader: &mut R,
     chunk_map: &ChunkMap,

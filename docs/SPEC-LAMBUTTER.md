@@ -102,23 +102,53 @@ impl<R: BlockRead> Btrfs<R> {
     /// Open the filesystem. Reads the primary superblock, validates
     /// it, replays the chunk tree's bootstrap, walks the root tree to
     /// find the default subvolume, and returns a handle.
-    pub fn open(reader: R) -> Result<Self, Error>;
+    ///
+    /// `device_size_bytes` is the byte length of the underlying volume;
+    /// the loader uses it to decide which of the four canonical
+    /// superblock copies are addressable. Because `BlockRead` does not
+    /// expose a size (it is a pure byte-range contract, intentionally
+    /// non-seekable), the size is passed explicitly.
+    pub fn open(reader: R, device_size_bytes: u64) -> Result<Self, Error>;
+
+    /// Subvolume objectid resolved as the default at mount time.
+    pub fn default_subvol_objectid(&self) -> u64;
 
     /// Resolve a path to an inode within the active subvolume.
     pub fn resolve(&mut self, path: Path<'_>) -> Result<Inode, Error>;
 
+    /// Read inode metadata.
+    pub fn metadata(&mut self, inode: &Inode) -> Result<Metadata, Error>;
+
     /// Read a file's full contents into a freshly allocated `Vec<u8>`.
     /// Decompresses on the fly if the file's extents are compressed.
+    /// Callers reading large files should prefer `read_file_at`.
     pub fn read_file(&mut self, path: Path<'_>) -> Result<alloc::vec::Vec<u8>, Error>;
 
-    /// Read a file in chunks.
-    pub fn read_file_at(&mut self, inode: &Inode, offset: u64, buf: &mut [u8]) -> Result<usize, Error>;
+    /// Read up to `buf.len()` bytes from `inode` starting at `offset`.
+    /// Returns the number of bytes written (0 = end of file). Memory
+    /// cost is bounded at one extent + the caller's buffer; this is the
+    /// right API for bootloaders streaming a kernel image.
+    pub fn read_file_at(
+        &mut self,
+        inode: &Inode,
+        offset: u64,
+        buf: &mut [u8],
+    ) -> Result<usize, Error>;
 
-    /// Iterate the entries of a directory.
-    pub fn read_dir<'a>(&'a mut self, path: Path<'_>) -> Result<DirIter<'a, R>, Error>;
+    /// Read a symlink's target as raw bytes. Errors if the path doesn't
+    /// resolve or doesn't point to a symlink.
+    pub fn read_link(&mut self, path: Path<'_>) -> Result<alloc::vec::Vec<u8>, Error>;
 
-    /// Stat an inode (size, mode, link count, mtime, etc.).
-    pub fn metadata(&mut self, inode: &Inode) -> Result<Metadata, Error>;
+    /// Enumerate the entries of the directory at `path`.
+    ///
+    /// Returns an owned `Vec<DirEntry>` rather than a streaming iterator:
+    /// a directory's entries live in DIR_INDEX items packed across one or
+    /// more leaves, and iterating across leaf boundaries requires re-
+    /// issuing `BlockRead` calls that conflict with a borrow on the
+    /// in-progress leaf. Eager materialisation avoids the
+    /// self-referential-borrow problem and is acceptable for `/boot`
+    /// directories (~tens of entries, never thousands).
+    pub fn read_dir(&mut self, path: Path<'_>) -> Result<alloc::vec::Vec<DirEntry>, Error>;
 }
 ```
 
@@ -473,7 +503,19 @@ Tokens used in `Error` variants and trust-log integration. Stable across patch r
 | `child_count` | `Error::CorruptBtree` | interior node has 0 or > capacity children |
 | `infinite_recursion` | `Error::CorruptBtree` | walker depth exceeded sane bound |
 | `comp_zlib` / `comp_lzo` / `comp_zstd` | `Error::BadCompression` | decompressor rejected input |
-| `oom_extent` | `Error::OutOfMemory` | allocation failed during file-read buffer expansion |
+| `comp_oversized` | `Error::BadCompression` | compressed extent claimed on-disk size exceeding `MAX_DECOMPRESSED_EXTENT_BYTES` |
+| `comp_unknown` | `Error::BadCompression` | compression algorithm field not 0/1/2/3 |
+| `chunk_overflow` | `Error::CorruptBtree` | chunk-tree arithmetic would overflow u64 |
+| `chunk_overlap` | `Error::CorruptBtree` | two chunk mappings overlap in the logical address space |
+| `chunk_unmapped` | `Error::CorruptBtree` | logical bytenr falls outside every chunk mapping |
+| `extent_past_eof` | `Error::CorruptBtree` | EXTENT_DATA key.offset exceeds the inode's size |
+| `extent_overlap` | `Error::CorruptBtree` | two EXTENT_DATA items cover overlapping regions of the same inode |
+| `extent_overflow` | `Error::CorruptBtree` | extent arithmetic (disk_bytenr + offset) would overflow |
+| `extent_underdecoded` | `Error::CorruptBtree` | compressed extent decoded to fewer bytes than its declared `ram_bytes` |
+| `extent_type_unknown` | `Error::CorruptBtree` | EXTENT_DATA `ty` field is not inline/regular/prealloc |
+| `extent_header_short` / `extent_tail_short` | `Error::CorruptBtree` | EXTENT_DATA item body too small for its header / tail |
+| `symlink_long` | `Error::UnsupportedFeature` | symlink target stored as a regular extent (rare; legal) |
+| `oom_extent` / `file_buffer` / `hole_fill` / `compressed_disk` / `extent_emit` / `extent_offset` / `file_size_overflow` / `read_at_overflow` / `finalize` | `Error::OutOfMemory` | allocation failed at the named site |
 
 ## 12. Non-goals (explicit)
 

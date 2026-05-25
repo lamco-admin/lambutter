@@ -149,7 +149,46 @@ pub(crate) fn read_tree_block<R: BlockRead>(
         });
     }
 
-    Ok(TreeBlock { header, body })
+    let block = TreeBlock { header, body };
+    validate_keys_strictly_ascending(&block)?;
+    Ok(block)
+}
+
+/// Validate that the keys in a tree block are in strict ascending order.
+/// Runs once when the block is loaded so all subsequent binary-searches can
+/// trust the invariant. Cost is O(nritems) parses per block load — typical
+/// btrfs leaves carry ~200–300 items, so this is microseconds per block.
+fn validate_keys_strictly_ascending(block: &TreeBlock) -> Result<()> {
+    let n = block.header.nritems;
+    if n < 2 {
+        return Ok(());
+    }
+    if block.header.level == 0 {
+        let mut prev = block.leaf_item(0)?.key;
+        for i in 1..n {
+            let cur = block.leaf_item(i)?.key;
+            if prev >= cur {
+                return Err(Error::CorruptBtree {
+                    token: "key_order",
+                    logical: block.header.bytenr,
+                });
+            }
+            prev = cur;
+        }
+    } else {
+        let mut prev = block.key_ptr(0)?.key;
+        for i in 1..n {
+            let cur = block.key_ptr(i)?.key;
+            if prev >= cur {
+                return Err(Error::CorruptBtree {
+                    token: "key_order",
+                    logical: block.header.bytenr,
+                });
+            }
+            prev = cur;
+        }
+    }
+    Ok(())
 }
 
 /// Find the leaf item with key `target`, exact-match.
@@ -268,16 +307,14 @@ fn binary_search_interior(block: &TreeBlock, target: &DiskKey) -> Result<u32> {
 
 /// Binary search the leaf for the first item whose key is `>= target`.
 /// Returns `Ok(Some(idx))` if such an item exists, `Ok(None)` if every item
-/// is strictly less than `target`. Also validates that the leaf's keys are
-/// strictly ascending; out-of-order keys yield `CorruptBtree`.
+/// is strictly less than `target`. Leaf ordering is validated upstream
+/// in [`read_tree_block`] so the search itself can trust strict ascending.
 fn binary_search_leaf(block: &TreeBlock, target: &DiskKey) -> Result<Option<u32>> {
     let n = block.header.nritems;
     if n == 0 {
         return Ok(None);
     }
 
-    // Validate ascending order via spot-check during the search; full
-    // validation across nritems would cost O(n) per descent.
     let mut lo: u32 = 0;
     let mut hi: u32 = n;
     while lo < hi {
@@ -296,41 +333,10 @@ fn binary_search_leaf(block: &TreeBlock, target: &DiskKey) -> Result<Option<u32>
     }
 }
 
-/// Iterate the leaf's items starting at `start_idx`. The iterator does NOT
-/// follow leaf-to-leaf chaining in v0.1.0 (we stop at end of leaf); callers
-/// that need cross-leaf iteration must repeatedly call `find_first_ge` with
-/// an updated target. This is sufficient for DIR_ITEM hash-collision
-/// iteration and EXTENT_DATA enumeration within a single inode's items.
-pub(crate) struct LeafIter<'a> {
-    block: &'a TreeBlock,
-    next: u32,
-}
-
-impl<'a> LeafIter<'a> {
-    pub(crate) fn new(block: &'a TreeBlock, start: u32) -> Self {
-        Self { block, next: start }
-    }
-}
-
-impl<'a> Iterator for LeafIter<'a> {
-    type Item = Result<LeafItem>;
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.next >= self.block.header.nritems {
-            return None;
-        }
-        let res = self.block.leaf_item(self.next);
-        self.next += 1;
-        Some(res)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        checksum::crc32c,
-        format::constants::{FSID_LEN, UUID_LEN},
-    };
+    use crate::{checksum::crc32c, format::constants::UUID_LEN};
 
     /// Build a minimal valid leaf containing a sequence of (key, data) pairs.
     /// Items are placed in the post-header area; their data tails grow from
@@ -385,12 +391,12 @@ mod tests {
 
     /// Wrap a leaf as a synthetic single-chunk volume so the walker can read
     /// it via the chunk map. Returns (chunk_map, device_bytes, root_logical).
-    fn synth_volume(nodesize: u32, leaf: Vec<u8>, root_logical: u64) -> (ChunkMap, Vec<u8>) {
+    fn synth_volume(nodesize: u32, leaf: &[u8], root_logical: u64) -> (ChunkMap, Vec<u8>) {
         // Place the leaf at physical offset == root_logical for simplicity.
         let mut device = vec![0u8; (root_logical as usize) + leaf.len()];
         device[root_logical as usize..].copy_from_slice(&leaf);
 
-        let mut map = ChunkMap::new();
+        let mut map = ChunkMap::default();
         // Build a system chunk array entry covering [root_logical, root_logical + nodesize).
         let mut entry = Vec::new();
         entry.extend_from_slice(&3u64.to_le_bytes());
@@ -412,8 +418,6 @@ mod tests {
         let used = entry.len();
         entry.resize(2048, 0);
         map.parse_system_chunk_array(&entry, used).unwrap();
-
-        let _fsid = [0u8; FSID_LEN];
         (map, device)
     }
 
@@ -441,7 +445,7 @@ mod tests {
             root,
             &[(key_a, b"AAAA"), (key_b, b"BB"), (key_c, b"CCCCCC")],
         );
-        let (map, device) = synth_volume(nodesize, leaf, root);
+        let (map, device) = synth_volume(nodesize, &leaf, root);
         let mut reader: &[u8] = &device;
 
         let result = find_exact(&mut reader, &map, nodesize, root, &key_b)
@@ -462,7 +466,7 @@ mod tests {
             offset: 0,
         };
         let leaf = build_leaf(nodesize, root, &[(key_a, b"X")]);
-        let (map, device) = synth_volume(nodesize, leaf, root);
+        let (map, device) = synth_volume(nodesize, &leaf, root);
         let mut reader: &[u8] = &device;
 
         let absent = DiskKey {
@@ -500,7 +504,7 @@ mod tests {
             root,
             &[(keys[0], b"a"), (keys[1], b"b"), (keys[2], b"c")],
         );
-        let (map, device) = synth_volume(nodesize, leaf, root);
+        let (map, device) = synth_volume(nodesize, &leaf, root);
         let mut reader: &[u8] = &device;
 
         let target = DiskKey {
@@ -516,6 +520,44 @@ mod tests {
     }
 
     #[test]
+    fn binary_search_leaf_detects_disordered_adjacent_keys() {
+        // Build a leaf where keys[0] > keys[1] — a corruption that the
+        // pre-B5 binary search would silently traverse. The fix should
+        // surface CorruptBtree { token: "key_order" } when the search
+        // visits the disordered pair.
+        let nodesize = 4096u32;
+        let root = 0x10_0000u64;
+        let big = DiskKey {
+            objectid: 99,
+            item_type: 1,
+            offset: 0,
+        };
+        let small = DiskKey {
+            objectid: 1,
+            item_type: 1,
+            offset: 0,
+        };
+        let leaf = build_leaf(nodesize, root, &[(big, b"X"), (small, b"Y")]);
+        let (map, device) = synth_volume(nodesize, &leaf, root);
+        let mut reader: &[u8] = &device;
+
+        // Any search that visits both items must trip the order check.
+        let probe = DiskKey {
+            objectid: 50,
+            item_type: 1,
+            offset: 0,
+        };
+        let result = find_exact(&mut reader, &map, nodesize, root, &probe);
+        assert!(matches!(
+            result,
+            Err(Error::CorruptBtree {
+                token: "key_order",
+                ..
+            })
+        ));
+    }
+
+    #[test]
     fn rejects_corrupted_csum() {
         let nodesize = 4096u32;
         let root = 0x10_0000u64;
@@ -527,7 +569,7 @@ mod tests {
         let mut leaf = build_leaf(nodesize, root, &[(key_a, b"X")]);
         // Flip a body byte without updating the csum
         leaf[200] ^= 0xFF;
-        let (map, device) = synth_volume(nodesize, leaf, root);
+        let (map, device) = synth_volume(nodesize, &leaf, root);
         let mut reader: &[u8] = &device;
 
         let result = find_exact(&mut reader, &map, nodesize, root, &key_a);

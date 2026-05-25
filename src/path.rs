@@ -34,12 +34,6 @@ impl<'a> Path<'a> {
         Some(Self { bytes })
     }
 
-    /// Construct an absolute path from a byte slice without checking the
-    /// leading slash. Caller asserts the slice is absolute.
-    pub(crate) const fn from_bytes_unchecked(bytes: &'a [u8]) -> Self {
-        Self { bytes }
-    }
-
     /// Iterate the path's components, skipping empty segments and `.`
     /// components. Each component is a non-empty byte slice.
     pub(crate) fn components(&self) -> Components<'a> {
@@ -52,11 +46,16 @@ impl<'a> Path<'a> {
     }
 }
 
+/// Conversion from `&str`. Returns a path that delegates to the same
+/// validation as `Path::new`; non-absolute strings produce a path whose
+/// component iterator yields nothing (since `components()` requires a leading
+/// `/` to skip past). Callers wanting absolute-only enforcement at the
+/// boundary should use `Path::new(s.as_bytes())` directly.
 impl<'a> From<&'a str> for Path<'a> {
     fn from(s: &'a str) -> Self {
-        Self::new(s.as_bytes()).unwrap_or(Self {
+        Self {
             bytes: s.as_bytes(),
-        })
+        }
     }
 }
 

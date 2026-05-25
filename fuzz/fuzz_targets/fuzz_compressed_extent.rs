@@ -6,10 +6,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! Fuzz the compression decoders directly. Each input is split: the first
-//! byte selects the algorithm, the remainder is passed to the decoder.
-//! Bugs surface as panics, OOB, runaway allocations, or output exceeding
-//! the configured cap.
+//! Fuzz the compression decoders directly via the `__fuzz_internals`
+//! re-export. The first byte selects algorithm (modulo 4: NONE, ZLIB, LZO,
+//! ZSTD), the rest is the compressed payload. Bugs surface as panics,
+//! out-of-bounds reads, runaway allocation, or output past the 16 MiB cap.
 
 #![no_main]
 
@@ -19,17 +19,8 @@ fuzz_target!(|data: &[u8]| {
     if data.is_empty() {
         return;
     }
-    let _algorithm = data[0];
-    let _payload = &data[1..];
-
-    // The compression dispatcher is crate-private; the public surface that
-    // exercises it is `read_file`. To keep the harness focused, we feed
-    // compressed payloads via a synthetic volume image. Image construction
-    // for an inline-extent EXTENT_DATA item is small but non-trivial; v0.1.0
-    // ships this harness as a placeholder until the fixture-image scaffolding
-    // lands. The fuzzer still exercises the public `Btrfs::open` path.
-    let reader: &[u8] = data;
-    if data.len() >= 0x10000 + 65536 {
-        let _ = lambutter::Btrfs::open(reader, data.len() as u64);
-    }
+    let algorithm = data[0] % 4;
+    let payload = &data[1..];
+    let mut dst = Vec::new();
+    let _ = lambutter::__fuzz_internals::decode(algorithm, payload, &mut dst);
 });
