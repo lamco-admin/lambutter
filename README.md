@@ -9,13 +9,15 @@ bare-metal kernels, and recovery tooling.
 
 ## Status
 
-**v0.1.x — feature-complete for the declared scope** (see
-[`docs/SPEC-LAMBUTTER.md` §2](docs/SPEC-LAMBUTTER.md)). Open and read regular
-files, symlinks, and directory listings on SINGLE / DUP / RAID1 / RAID1C3 /
-RAID1C4 btrfs volumes; decode zstd, zlib, and LZO extents; surface unsupported
-profiles (RAID0/10/5/6, ZONED, RAID_STRIPE_TREE) as typed errors. The public
-API may add but not break within the v0.1.x line. Data-block CSUM verification
-and snapshot enumeration are tracked for v0.2.0+.
+**v0.3.0 — feature-complete + live-validated** (see
+[`docs/SPEC-LAMBUTTER.md` §2](docs/SPEC-LAMBUTTER.md) for scope, and
+[`CHANGELOG.md`](CHANGELOG.md) for the version arc through v0.1.0 →
+v0.3.0). Open and read regular files, symlinks, and directory listings
+on SINGLE / DUP / RAID1 / RAID1C3 / RAID1C4 btrfs volumes; decode zstd,
+zlib, and LZO extents; surface unsupported profiles (RAID0/10/5/6,
+ZONED, RAID_STRIPE_TREE) as typed errors. The public API may add but
+not break within the v0.3.x line. Data-block CSUM verification and
+snapshot enumeration are tracked for v0.4.0+.
 
 **Validation posture:**
 - 36 host unit tests, all modules

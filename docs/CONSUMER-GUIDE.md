@@ -19,8 +19,8 @@ In your consumer crate's `Cargo.toml`:
 ```toml
 [dependencies]
 # Pin exactly while you stabilize against a specific lambutter behavior.
-# Loosen to "^0.1" once you're confident across the v0.1.x line.
-lambutter = { version = "=0.1.1", default-features = false, features = ["zstd", "zlib", "lzo"] }
+# Loosen to "^0.3" once you're confident across the v0.3.x line.
+lambutter = { version = "=0.3.0", default-features = false, features = ["zstd", "zlib", "lzo"] }
 ```
 
 Notes on the dependency line:
@@ -36,8 +36,8 @@ Notes on the dependency line:
   sufficient.
 - **Exact-pin vs loose**: lambutter follows semver. Within 0.1.x,
   public API may *add* but not break. The exact-pin is for downstream
-  audit reproducibility — if you trust the v0.1.x semver guarantee,
-  use `^0.1.1`.
+  audit reproducibility — if you trust the v0.3.x semver guarantee,
+  use `^0.3.0`.
 
 ---
 
@@ -339,9 +339,9 @@ sensitive contexts like bootloaders):
    easier than tracking compatibility windows).
 
 For consumers using `^0.1` semver match:
-- Within v0.1.x: API additions only. Your code should keep compiling.
-- The first breaking change will be v0.2.0; expect to upgrade
-  deliberately, not transparently.
+- Within v0.3.x: API additions only. Your code should keep compiling.
+- The first breaking change will be v0.4.0 (or v1.0.0 if we go straight
+  to the stable line); expect to upgrade deliberately, not transparently.
 
 ---
 
@@ -355,7 +355,7 @@ backend. Its consumer code is at:
 - BlockIO adapter for UEFI `EFI_BLOCK_IO_PROTOCOL`
 - Error translation table from `lambutter::Error` → `FsError`
 - Symlink-follow loop (the `resolve_following` pattern from §3)
-- UUID extraction from the partition probe (lambutter v0.1.x doesn't
+- UUID extraction from the partition probe (lambutter v0.3.x doesn't
   expose superblock UUID; LamBoot reads it from byte offset 0x20
   before lambutter `open`s)
 

@@ -113,7 +113,7 @@ SINGLE and DUP dominate.
 | Default = base `@` subvolume (no Snapper or pre-Snapper) | ✓ |
 | Default = `@/.snapshots/N/snapshot` via OID-6 DIR_ITEM "default" (Snapper) | ✓✓ |
 | Default = arbitrary subvolume picked by `btrfs subvolume set-default` post-install | ⊕ |
-| Caller-supplied default override (future API) | ✗ (not implemented in v0.1.x) |
+| Caller-supplied default override (future API) | ✗ (not implemented in v0.3.x) |
 
 ### 3.2 Reading from the active default
 
