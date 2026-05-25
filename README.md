@@ -17,9 +17,21 @@ profiles (RAID0/10/5/6, ZONED, RAID_STRIPE_TREE) as typed errors. The public
 API may add but not break within the v0.1.x line. Data-block CSUM verification
 and snapshot enumeration are tracked for v0.2.0+.
 
-Test coverage: 35 host unit tests, 9 fixture-based oracle tests (uncompressed,
-zstd, zlib, LZO, DUP-metadata, NO_HOLES sparse, symlinks, read-at chunked),
-5 fuzz harnesses.
+**Validation posture:**
+- 36 host unit tests, all modules
+- 9 fixture-based oracle tests (uncompressed, zstd, zlib, LZO,
+  DUP-metadata, NO_HOLES sparse, symlinks, read-at chunked, smoke)
+- 5 cargo-fuzz harnesses, 1-hour smoke run completed with zero crashes
+- Live host validation: `examples/inspect.rs` against live openSUSE
+  Tumbleweed btrfs partition with Snapper-managed default-subvol
+  redirect — 6 path reads (regular file 38 MB full-extent walk +
+  inline 11 B + 1.2 KB normal, symlinks in both `/boot` and `/etc`)
+  all sha256-byte-identical to kernel oracle
+- **Live embedded validation**: linked into [LamBoot](https://lamboot.dev)
+  (Lamco's UEFI bootloader) as the native btrfs backend, booting
+  openSUSE Tumbleweed end-to-end under live UEFI firmware with full
+  trust-chain attribution. See the
+  [case study](https://github.com/lamco-admin/lamboot-dev/blob/main/docs/migration/VM-102-OPENSUSE-TUMBLEWEED-BIOS-TO-UEFI-CASE-STUDY.md).
 
 ## Use
 
@@ -43,6 +55,17 @@ loop {
 }
 ```
 
+For integrating from another `no_std` Rust project — including the
+`BlockRead` impl patterns for UEFI `EFI_BLOCK_IO_PROTOCOL`, file-backed
+host testing, and the standard symlink-follow pattern — see the
+[Consumer Guide](docs/CONSUMER-GUIDE.md).
+
+A worked end-to-end example lives at `examples/inspect.rs`: a host-side
+CLI that opens any block device or image file, reports the resolved
+default-subvol objectid, and reads a named file printing size + sha256
++ first 16 bytes. Built with `cargo build --release --example inspect`;
+run as root against a real device for live validation.
+
 ## Goals
 
 - Read-only by design. The crate cannot mutate a btrfs volume.
@@ -62,7 +85,43 @@ loop {
 - Replacing the kernel's btrfs driver. Lambutter is for code paths where
   the kernel is not yet running.
 
+## Features (Cargo)
+
+| Feature | Default | What it enables |
+|---|---|---|
+| `zstd` | yes | zstd-compressed extent decoding via `ruzstd` (Tumbleweed / Fedora F34+ default) |
+| `zlib` | no | zlib-compressed extent decoding via `miniz_oxide` (legacy default) |
+| `lzo` | no | LZO-compressed extent decoding via `lzokay` (rare in modern installs) |
+| `std` | no | enables `std::error::Error` impl on `Error` (host-only) |
+
+For UEFI bootloaders that may encounter any compression on `/boot`,
+enable all three: `features = ["zstd", "zlib", "lzo"]`.
+
+## Documentation
+
+- [`docs/SPEC-LAMBUTTER.md`](docs/SPEC-LAMBUTTER.md) — design spec, on-disk format scope
+- [`docs/FEATURES.md`](docs/FEATURES.md) — exhaustive feature inventory + non-features
+- [`docs/SUPPORTED-SCENARIOS.md`](docs/SUPPORTED-SCENARIOS.md) — distro × btrfs-config coverage matrix
+- [`docs/CONSUMER-GUIDE.md`](docs/CONSUMER-GUIDE.md) — integrating lambutter into a downstream `no_std` Rust project
+- [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) — error catalogue (symptom → cause → fix)
+- [`docs/TESTING-AND-FUZZING-PLAN.md`](docs/TESTING-AND-FUZZING-PLAN.md) — test/fuzz strategy + validation results
+- [`docs/PRE-PUBLISH-AND-TESTING-PLAN.md`](docs/PRE-PUBLISH-AND-TESTING-PLAN.md) — pre-publish hygiene checklist
+- [`CHANGELOG.md`](CHANGELOG.md) — version history
+
 ## License
 
 Dual-licensed under MIT or Apache-2.0, at your option. See
 [`LICENSE-MIT`](LICENSE-MIT) and [`LICENSE-APACHE`](LICENSE-APACHE).
+
+## Contributing
+
+Contributions welcome — particularly:
+
+- Additional fixture scenarios (`tests/fixtures/`)
+- Per-distro real-world validation (the
+  [LamBoot scenarios matrix](https://github.com/lamco-admin/lamboot-dev/blob/main/docs/migration/SCENARIOS-MATRIX.md)
+  tracks what's been live-validated across the wider ecosystem)
+- v0.2.x scope items: data-block CSUM_TREE verification, snapshot
+  enumeration, full subvolume traversal
+
+See `docs/SPEC-LAMBUTTER.md` for design constraints before opening a PR.
