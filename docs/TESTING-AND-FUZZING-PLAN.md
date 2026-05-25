@@ -34,10 +34,12 @@ v0.1.0 ships (symlink target reading).
 
 | Layer | What's done | What's pending for v0.1.0 |
 |---|---|---|
-| A — host unit tests | 34 tests, all modules covered for happy-path + targeted error paths | Symlink resolution test once `read_link` lands |
-| B — fixture-based oracle tests | Architectural plan only; no `tests/fixtures/*.img.zst` exists yet | Generation scripts + 6 fixtures + harness |
-| C — fuzz harnesses | 5 cargo-fuzz targets scaffolded; no corpus | Seed corpus from real `mkfs.btrfs` images + 1 hour smoke run per target |
-| Feature audit | Cross-checked against format-reference §13 (see §3) | Close `read_link` gap; ship |
+| A — host unit tests | 36 tests, all modules covered for happy-path + targeted error paths | — (read_link landed) |
+| B — fixture-based oracle tests | 8 fixtures (F1 SINGLE, F2 zstd, F3 zlib, F4 LZO, F5 DUP+SINGLE, F8 NO_HOLES, F9 symlinks, plus random-bytes smoke), all passing | — |
+| C — fuzz harnesses | 5 cargo-fuzz targets scaffolded + 1-hour smoke run completed with zero crashes | — |
+| D — real-distro live validation | **NEW** — `examples/inspect.rs` ran against live openSUSE Tumbleweed btrfs partition on VM 102 (Snapper default-subvol redirect, 38 MB initrd, two-hop symlink chain, inline + multi-extent regular files, /boot + /etc traversal): all sha256-byte-identical to kernel oracle | — |
+| E — embedded-context live validation | **NEW** — lambutter linked into `lamboot-core` (LamBoot's UEFI bootloader), booting under live UEFI firmware on the same VM 102, reading the live kernel via 40-hop symlink-follow and feeding it into LamBoot's PE loader: complete audit trail in boot-trust.log including `backend=lambutter@0.1.x-path` propagated through `volume_mounted` and `image_loaded_native`. See `lamboot-dev/docs/migration/VM-102-OPENSUSE-TUMBLEWEED-BIOS-TO-UEFI-CASE-STUDY.md` for the full record. | — |
+| Feature audit | Cross-checked against format-reference §13 (see §3) | — (read_link landed) |
 
 ## 3. Feature-coverage audit (§13 of the format reference)
 
