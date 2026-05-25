@@ -32,7 +32,7 @@ what evidence we have.
 |---|---|---|---|
 | Tumbleweed (pre-2025-11-13 install) | `/boot` directory in `@` subvol; Snapper-managed default-subvol redirect to `@/.snapshots/1/snapshot` | ✓✓ | VM 102 case study, full UEFI boot |
 | Tumbleweed (post-2025-11-13 install with `grub2-bls`) | `/boot` moved to FAT ESP; subvolume layout unchanged | ✓ (fixture-equivalent) | grub2-bls path doesn't traverse btrfs `/boot`; root traversal works |
-| Leap 16+ | Same as Tumbleweed (Snapper btrfs) | ⊕ | Same code path; VM 130 provisioned for explicit test |
+| Leap 16+ | Same as Tumbleweed (Snapper btrfs) | ✓✓ | VM 130 validated 2026-05-25 — end-to-end live boot under LamBoot with `verified_via=degraded_trust_sb_off`, native PE loader + lambutter@0.3.0-path backend, full Plasma desktop reached |
 | SLES | Same Snapper layout | ⊕ | Same as Leap |
 | MicroOS / Aeon | Transactional-update on btrfs | ~ | Read-only root subvolume + RW overlay; lambutter only ever reads the static base layer, should work but untested |
 
@@ -281,3 +281,13 @@ We'll add the scenario to this matrix once triaged.
 ## 10. Change log
 
 - 2026-05-25: Initial matrix. Captures post-VM-102 validation state.
+- 2026-05-25 (later): VM 130 (openSUSE Leap 16) live boot validated
+  under LamBoot — Leap 16+ row in §1.1 promoted ⊕ → ✓✓. Same
+  Snapper-managed `/boot`-in-`@`-subvol layout as Tumbleweed
+  pre-2025-11-13 (VM 102), exercising the same lambutter code path
+  (default-subvol redirect → directory walk → leaf-level symlink
+  follow → extent read). No new lambutter bugs surfaced — the
+  end-to-end success confirms that the second Snapper distro behaves
+  identically to the first, validating the design assumption that
+  lambutter's coverage of openSUSE-family layouts is robust across
+  the SLES/Leap/Tumbleweed/MicroOS axis.
