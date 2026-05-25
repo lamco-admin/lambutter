@@ -43,15 +43,6 @@ pub(crate) fn read_le_u8(buf: &[u8], offset: usize) -> u8 {
     buf[offset]
 }
 
-/// Round `value` up to the next multiple of `align`. `align` must be a power
-/// of two; debug builds assert this. Caller is expected to pass btrfs-spec
-/// alignments (sector size, node size).
-#[inline]
-pub(crate) fn align_up(value: u64, align: u64) -> u64 {
-    debug_assert!(align.is_power_of_two(), "alignment must be a power of two");
-    (value + align - 1) & !(align - 1)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -62,13 +53,5 @@ mod tests {
         assert_eq!(read_le_u16(&buf, 0), 0x5678);
         assert_eq!(read_le_u32(&buf, 0), 0x1234_5678);
         assert_eq!(read_le_u64(&buf, 0), 0xccdd_eeff_1234_5678);
-    }
-
-    #[test]
-    fn align_up_basic() {
-        assert_eq!(align_up(0, 4096), 0);
-        assert_eq!(align_up(1, 4096), 4096);
-        assert_eq!(align_up(4096, 4096), 4096);
-        assert_eq!(align_up(4097, 4096), 8192);
     }
 }

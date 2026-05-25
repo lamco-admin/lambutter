@@ -20,6 +20,19 @@
 //! offset table, and a `parse(buf: &[u8]) -> Self` function that reads the
 //! fields. Mutation is not supported — every type is constructed by
 //! parsing a slice, and there is no `to_bytes`.
+//!
+//! Many parsed fields (e.g. `Header::generation`, `ChunkItem::io_align`) are
+//! materialised even though v0.1.x has no read path that examines them.
+//! Parsing the full struct keeps the format mapping one-to-one with the
+//! on-disk layout and means a future scope addition needs no new parser, only
+//! a new caller. The module-level `#[expect(dead_code)]` documents this.
+
+#![expect(
+    dead_code,
+    reason = "format-reference completeness: parsed fields are materialised for the entire \
+              on-disk struct so that the parser stays one-to-one with the layout, even when \
+              the v0.1.x read paths only consume a subset of those fields"
+)]
 
 use crate::{
     format::constants::{CSUM_LEN, FSID_LEN, UUID_LEN},

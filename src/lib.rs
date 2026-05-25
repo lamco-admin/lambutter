@@ -45,6 +45,35 @@ pub use error::{Error, Result, SuperblockReason};
 pub use inode::{Inode, Metadata};
 pub use path::Path;
 
+/// Internals exposed solely for fuzz harnesses. NOT part of the public API
+/// surface; covered by no SemVer guarantee; gated on `cfg(fuzzing)` so it
+/// is unreachable from a normal build. Documented per
+/// `docs/TESTING-AND-FUZZING-PLAN.md` §6.4.
+#[doc(hidden)]
+#[cfg(fuzzing)]
+pub mod __fuzz_internals {
+    use alloc::vec::Vec;
+
+    /// Drive the compression dispatcher directly with arbitrary algorithm
+    /// + payload bytes. Used by `fuzz_compressed_extent`.
+    pub fn decode(algorithm: u8, src: &[u8], dst: &mut Vec<u8>) -> crate::Result<()> {
+        crate::compression::decode(algorithm, src, dst)
+    }
+
+    /// Drive the chunk-map's system-array parser directly with arbitrary
+    /// bytes. Used to fuzz the bootstrap path.
+    pub fn parse_system_chunk_array(bytes: &[u8]) -> crate::Result<()> {
+        let mut map = crate::chunk_tree::ChunkMap::default();
+        map.parse_system_chunk_array(bytes, bytes.len())
+    }
+
+    /// Drive the name-hash function directly. Used by `fuzz_dir_item`-style
+    /// targets that want to stress the table.
+    pub fn name_hash(name: &[u8]) -> u32 {
+        crate::checksum::crc32c_with_seed(0xFFFF_FFFE, name)
+    }
+}
+
 /// A mounted, read-only btrfs filesystem.
 ///
 /// Construct via [`Btrfs::open`], then resolve paths and read files using
@@ -67,7 +96,7 @@ impl<R: BlockRead> Btrfs<R> {
     pub fn open(mut reader: R, device_size_bytes: u64) -> Result<Self> {
         let sb = superblock::load(&mut reader, device_size_bytes)?;
 
-        let mut chunk_map = ChunkMap::new();
+        let mut chunk_map = ChunkMap::default();
         chunk_map
             .parse_system_chunk_array(&sb.sys_chunk_array, sb.sys_chunk_array_size as usize)?;
 
@@ -131,6 +160,9 @@ impl<R: BlockRead> Btrfs<R> {
 
     /// Read the full contents of `path`. Errors if the path doesn't resolve
     /// or doesn't point to a regular file.
+    ///
+    /// Prefer [`Btrfs::read_file_at`] for files larger than a few MiB — this
+    /// method allocates the entire file in one [`Vec<u8>`].
     pub fn read_file(&mut self, path: Path<'_>) -> Result<Vec<u8>> {
         let inode = self.resolve(path)?;
         file::read_file(
@@ -139,6 +171,26 @@ impl<R: BlockRead> Btrfs<R> {
             self.nodesize,
             self.fs_tree_root,
             inode.objectid,
+        )
+    }
+
+    /// Read up to `buf.len()` bytes from the file at the resolved `inode`
+    /// starting at byte `offset`. Returns the number of bytes written
+    /// (zero indicates end-of-file). Holes and prealloc extents read as
+    /// zeros; reads past EOF return 0.
+    ///
+    /// Memory cost is bounded at the size of one extent (typically a few
+    /// MiB) plus `buf.len()`, so this is the right API for bootloaders
+    /// streaming a kernel image or initrd in fixed-size chunks.
+    pub fn read_file_at(&mut self, inode: &Inode, offset: u64, buf: &mut [u8]) -> Result<usize> {
+        file::read_file_at(
+            &mut self.reader,
+            &self.chunk_map,
+            self.nodesize,
+            self.fs_tree_root,
+            inode.objectid,
+            offset,
+            buf,
         )
     }
 

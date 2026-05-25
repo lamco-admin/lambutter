@@ -9,7 +9,39 @@ bare-metal kernels, and recovery tooling.
 
 ## Status
 
-**Pre-alpha.** Authoring in progress; specification at `docs/SPEC-LAMBUTTER.md`.
+**v0.1.x — feature-complete for the declared scope** (see
+[`docs/SPEC-LAMBUTTER.md` §2](docs/SPEC-LAMBUTTER.md)). Open and read regular
+files, symlinks, and directory listings on SINGLE / DUP / RAID1 / RAID1C3 /
+RAID1C4 btrfs volumes; decode zstd, zlib, and LZO extents; surface unsupported
+profiles (RAID0/10/5/6, ZONED, RAID_STRIPE_TREE) as typed errors. The public
+API may add but not break within the v0.1.x line. Data-block CSUM verification
+and snapshot enumeration are tracked for v0.2.0+.
+
+Test coverage: 35 host unit tests, 9 fixture-based oracle tests (uncompressed,
+zstd, zlib, LZO, DUP-metadata, NO_HOLES sparse, symlinks, read-at chunked),
+5 fuzz harnesses.
+
+## Use
+
+```rust
+use lambutter::{Btrfs, Path};
+
+let mut fs = Btrfs::open(reader, device_size_bytes)?;
+
+// Resolve and read a file in one shot (loads the whole file into memory).
+let kernel = fs.read_file(Path::new(b"/vmlinuz")?)?;
+
+// Or stream it in fixed-size chunks (bounded memory).
+let inode = fs.resolve(Path::new(b"/vmlinuz")?)?;
+let mut buf = [0u8; 64 * 1024];
+let mut off = 0u64;
+loop {
+    let n = fs.read_file_at(&inode, off, &mut buf)?;
+    if n == 0 { break; }
+    process(&buf[..n]);
+    off += n as u64;
+}
+```
 
 ## Goals
 

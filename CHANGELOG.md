@@ -5,6 +5,117 @@ Keep a Changelog; semantic versioning is loose during pre-1.0.
 
 ## [Unreleased]
 
+Pre-publish hygiene + hardening pass. Closes every open item from
+`docs/PRE-PUBLISH-AND-TESTING-PLAN.md` §1 and the deep-code-review hardening
+items B1–B5.
+
+### Added
+
+- **`Btrfs::read_file_at(&inode, offset, &mut buf)`** — chunked file-read
+  API. Memory cost is bounded at the size of one extent + the caller's
+  buffer, so bootloaders streaming a kernel image / initrd no longer have to
+  materialise the whole file in one `Vec<u8>`. Walks extents lazily,
+  skipping those that end before the requested offset; decompresses
+  per-extent only once; zero-fills `NO_HOLES` gaps and prealloc extents on
+  the fly. Closes the spec §3.2 commitment that was unimplemented through
+  v0.1.1.
+- `__fuzz_internals` re-export (`#[doc(hidden)] #[cfg(fuzzing)]`) exposing
+  the compression dispatcher, system-chunk-array parser, and name-hash for
+  direct fuzz-harness drive. Closes
+  `docs/TESTING-AND-FUZZING-PLAN.md` §6.4.
+- `fuzz_compressed_extent` rewritten to call
+  `__fuzz_internals::decode(algorithm, payload)` directly — no longer a
+  placeholder that goes through `Btrfs::open` and almost never reaches the
+  decoders.
+- Seed corpus for all 5 fuzz targets populated from real
+  `mkfs.btrfs`-produced fixtures (F1–F9) + targeted compressed-payload
+  seeds.
+- New unit tests: chunk-overflow detection (`chunk_overflow` token),
+  leaf-ordering detection (`key_order` token), extent-logical-length
+  parsers, plaintext-cap regression lock.
+- Spec §3.2 + §11 amended to match implementation: documented
+  `Btrfs::open(reader, device_size_bytes)` signature, `read_file_at`,
+  `read_link`, `Vec<DirEntry>` return for `read_dir` (with rationale), and
+  the full token vocabulary added since v0.1.0.
+
+### Fixed (correctness / hardening)
+
+- **B1 — chunk-tree overflow.** `ChunkMap::insert` and `::resolve` now use
+  `checked_add` for `logical + length` arithmetic; a fuzz-only input with
+  `length = u64::MAX` would previously wrap past the overlap-detection
+  guard. New error token: `chunk_overflow`.
+- **B2 — gap-fill denial-of-service.** `file::read_file` capped EXTENT_DATA
+  gap-fill at the file size and routed the allocation through
+  `Vec::try_reserve` instead of `vec![0u8; gap]`. A malformed extent at
+  `key.offset = 2^60` could previously trigger a 2^60-byte allocation
+  attempt. New error token: `extent_past_eof`.
+- **B3 — compressed extent disk-size cap.** `file::apply_extent` and
+  `file::copy_extent_slice` reject `disk_num_bytes` exceeding
+  `MAX_DECOMPRESSED_EXTENT_BYTES` (16 MiB) before allocating the
+  compressed scratch buffer. A compressed extent's on-disk size cannot
+  legitimately exceed its plaintext size, so 16 MiB is correct. New error
+  token: `comp_oversized`.
+- **B4 — symlink_long mistyped.** `file::read_link` reported
+  `Error::CorruptBtree { token: "symlink_not_inline" }` for legal-but-rare
+  symlinks whose target is stored in a regular extent. Now reports
+  `Error::UnsupportedFeature("symlink_long")`, which is the correct
+  category.
+- **B5 — leaf key-order validation.** `btree::read_tree_block` now
+  validates strict ascending order over every key in a freshly-loaded tree
+  block (interior keyptrs or leaf items). The `key_order` token was in the
+  stable vocabulary since v0.1.0 but no code path ever emitted it; a
+  corrupt leaf with out-of-order keys would silently mis-resolve.
+- File-content read paths use `out.resize` against the up-front
+  `try_reserve_exact`'d capacity instead of `vec![0u8; n].extend_from_slice`
+  — one allocation per region rather than two. Side benefit: lower peak
+  RSS for sparse files.
+
+### Fixed (hygiene)
+
+- F3 zlib fixture test `#[cfg(feature = "zlib")]`-gated so
+  `cargo test --release` (no features) passes. F2 zstd test similarly
+  gated. (Sev 1 item from PRE-PUBLISH §1.1.)
+- 67 release-build warnings → 0. Added `#[expect(dead_code, reason = "...")]`
+  at module level to `format/constants.rs` and `format/repr.rs` documenting
+  why every spec constant / parsed field exists even when no v0.1.x caller
+  reads it. Genuinely-unused items removed: `util::align_up`,
+  `Path::from_bytes_unchecked`, `ChunkMap::new`, `ChunkMap::len`,
+  `btree::LeafIter`. Per-field `#[expect]` annotations added to
+  `ChunkMapping` (RAID0/10/5/6-only fields) and `Resolved::devid` (single-
+  device-only). (Sev 1 item from PRE-PUBLISH §1.2.)
+- Stale `v0.1.0` comments in `src/btree.rs` and `src/dir.rs` claiming
+  cross-leaf iteration is unimplemented (it has been since v0.1.0) deleted
+  and rewritten to describe the re-descend pattern actually in use. (Sev 1
+  item from PRE-PUBLISH §1.3.)
+- README status section rewritten for public-crate audience; added usage
+  example showing both `read_file` and `read_file_at` patterns. (Sev 1 item
+  from PRE-PUBLISH §1.5.)
+
+### Verified
+
+- **UEFI target compiles clean** for `x86_64-unknown-uefi` AND
+  `aarch64-unknown-uefi` across the full feature matrix
+  (no-default-features, zstd-only, all three compression features
+  combined) using
+  `rustup run nightly cargo build --target ... -Zbuild-std=core,compiler_builtins,alloc -Zbuild-std-features=compiler-builtins-mem`.
+  Closes PRE-PUBLISH §1.4.
+- `cargo build --release` reports **0 warnings** across
+  no-default-features / default-features / all-features.
+- `cargo clippy --release --all-features` reports **0 warnings** on the
+  library; only progressive `unwrap_used` / `expect_used` warnings remain
+  in tests (per `Cargo.toml` `[lints.clippy]` design).
+- `rustup run nightly cargo fmt --check` clean.
+- `cargo test --release --features zstd,zlib,lzo`: **42 unit tests +
+  9 fixture-based oracle tests** all pass (was 33 + 8 in v0.1.1).
+
+### Test totals
+
+- 42 host unit tests (was 33)
+- 9 fixture-based oracle tests (was 8 — `read_file_at` chunked-vs-full
+  oracle added)
+- 5 fuzz harnesses, all five exercise real code paths (was 4 functional +
+  1 placeholder)
+
 ## [0.1.1]
 
 Filling the v0.1.0 deferred-list per

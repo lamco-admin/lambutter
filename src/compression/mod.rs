@@ -26,7 +26,11 @@ mod zstd;
 
 /// Decoded plaintext capacity cap. Bounded by the format-spec recommended
 /// 16 MiB (`MAX_DECOMPRESSED_EXTENT_BYTES`); decompressors that try to grow
-/// past this bound return `Error::BadCompression`.
+/// past this bound return `Error::BadCompression`. Only emitted when at
+/// least one decoder feature is enabled; without any decoders the constant
+/// is referenced only via `file::apply_extent` for sizing the compressed
+/// scratch buffer (and that path is unreachable without a decoder).
+#[cfg(any(feature = "zlib", feature = "zstd", feature = "lzo"))]
 pub(crate) use crate::format::constants::MAX_DECOMPRESSED_EXTENT_BYTES;
 
 /// Decompress `src` into `dst`, dispatching on `algorithm`. The output
