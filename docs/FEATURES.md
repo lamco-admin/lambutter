@@ -4,7 +4,7 @@
 implements, what it deliberately omits, and the rationale for each
 choice. Update at every minor version bump.
 
-**As of v0.1.1.** Companion to:
+**As of v0.3.0.** Companion to:
 - `SPEC-LAMBUTTER.md` (design spec — what we *intend* to do)
 - `SUPPORTED-SCENARIOS.md` (real-world btrfs config matrix — what
   *works* in practice)
@@ -149,7 +149,7 @@ log-grep consumers. The full vocabulary:
 | `BadSuperblock(UnsupportedCsumType)` | — | Use a newer lambutter (if added) or different volume |
 | `BadSuperblock(UnsupportedIncompat)` | — | INCOMPAT flag we don't implement |
 | `BadSuperblock(BadGeometry)` | — | sectorsize / nodesize outside supported range |
-| `UnsupportedFeature(token)` | feature name (e.g. `"btrfs_incompat_flag"`) | Out of scope for v0.1.x |
+| `UnsupportedFeature(token)` | feature name (e.g. `"btrfs_incompat_flag"`) | Out of scope for v0.3.x |
 | `UnsupportedProfile(token)` | `raid0`, `raid10`, `raid5`, `raid6` | By design |
 | `UnsupportedChecksum(token)` | csum-type name | By design |
 | `CsumMismatch { logical }` | — | Disk corruption at that bytenr |
@@ -164,7 +164,7 @@ log-grep consumers. The full vocabulary:
 
 ## 4. Non-features (deliberate omissions)
 
-These are *not* bugs and will not be implemented in the v0.1.x line:
+These are *not* bugs and will not be implemented in the v0.3.x line:
 
 | Item | Why deferred / rejected |
 |---|---|
@@ -178,10 +178,10 @@ These are *not* bugs and will not be implemented in the v0.1.x line:
 | Data-block CSUM_TREE verification | v0.2.0+ scope — metadata-block CSUMs ARE verified |
 | Multi-device read with stripe-failover (RAID1 with primary device missing) | Complex stripe-selection logic; v0.2.0+ candidate if a real consumer needs it |
 | Hardware-accelerated CRC32C (SSE 4.2 / ARMv8 CRC) | Software-only by default; can be added behind a feature flag |
-| Encrypted btrfs (`fscrypt` per-file encryption) | Not part of the v0.1.x scope; btrfs encryption is itself a non-default and not yet widespread |
+| Encrypted btrfs (`fscrypt` per-file encryption) | Not part of the v0.3.x scope; btrfs encryption is itself a non-default and not yet widespread |
 | LZ4 / xz / brotli extent decoding | Not in btrfs format spec — only zstd/zlib/LZO are valid |
 | Generic `BlockWrite` trait | Crate is read-only |
-| File modification time / extended attributes (xattr) | Out of scope for v0.1.x — kernel-load consumers don't need them |
+| File modification time / extended attributes (xattr) | Out of scope for v0.3.x — kernel-load consumers don't need them |
 | ACL reading | Out of scope — same reason |
 
 ---
@@ -222,7 +222,7 @@ For audit consumers needing reproducible-build-style attribution:
 | Hook | Where |
 |---|---|
 | Source revision pin | `Cargo.toml` `version = "X.Y.Z"` + git tag |
-| Crate version in trust logs | Downstream embeds via backend-tag string (e.g. LamBoot uses `lambutter@0.1.x-path`) |
+| Crate version in trust logs | Downstream embeds via backend-tag string (e.g. LamBoot uses `lambutter@0.3.0-path`) |
 | Per-extent compression algorithm | Surfaced in `Error::BadCompression { algorithm }` on decode failure; readable from EXTENT_DATA item field on success (not currently exposed via public API — could add for full audit if needed) |
 | sha256 of file content | Caller's responsibility — lambutter only produces bytes |
 | sha256 of metadata-block content | Internal — verified on read, not exposed |
