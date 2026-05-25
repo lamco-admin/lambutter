@@ -238,6 +238,18 @@ For each: what users will see if they try.
 - The `rootflags=subvol=...` in BLS entries must be honored by the
   consuming bootloader; lambutter doesn't itself care, but the
   CONSUMER should pass the correct subvol to mount.
+- **Two-scan-path observation (VM 132, 2026-05-25, snapshot 20260425):**
+  Tumbleweed's `kernel-install` plugins actually place each kernel at
+  TWO locations: `/boot/vmlinuz-<ver>` (legacy btrfs-subvol path) AND
+  `/EFI/opensuse-tumbleweed/<ver>/linux-<hash>` (BLS-on-ESP path).
+  Both are byte-identical (same sha256). A consuming bootloader can
+  read EITHER via lambutter (the btrfs path) OR via a FAT driver (the
+  ESP path) and get the same kernel; LamBoot's autodiscovery picks one
+  per boot based on sort-key. This is **opportunistic redundancy** —
+  good for resilience (lose the ESP entries and lambutter can still
+  find a kernel; lose `/boot` access and the ESP path works) — and
+  validates that lambutter's `/boot` reads compose with the
+  shim-cryptographic-verification chain identically to FAT-ESP reads.
 
 ### CachyOS (when using f2fs `/boot`)
 
@@ -291,3 +303,17 @@ We'll add the scenario to this matrix once triaged.
   identically to the first, validating the design assumption that
   lambutter's coverage of openSUSE-family layouts is robust across
   the SLES/Leap/Tumbleweed/MicroOS axis.
+- 2026-05-25 (later still): VM 132 (Tumbleweed snapshot 20260425,
+  `grub2-bls` install) live boot validated **under shim+MOK** —
+  lambutter@0.3.0-path mounted the btrfs root, LamBoot's autodiscovery
+  scanned both `/boot/vmlinuz-<ver>` (via lambutter) and
+  `/EFI/opensuse-tumbleweed/<ver>/linux-<hash>` (via FAT-ESP), the
+  selected kernel was verified via `ShimLock.Verify()` (returning
+  `verified_via=shim_mok status=SUCCESS` in the trust log), and the
+  native PE loader handled the actual boot. **First combined Path A
+  + Config 3 success** on the LamBoot scenarios matrix — proves
+  lambutter's `/boot` reads compose with the cryptographic
+  shim-trust chain identically to FAT-ESP reads. No lambutter bugs
+  surfaced (the surfaced bugs were all in `lamboot-install`'s
+  shim-chain setup; see lamboot-dev v0.9.2 and v0.9.3). Added §8
+  Tumbleweed-grub2-bls block detail on the two-scan-path redundancy.
