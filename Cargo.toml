@@ -1,4 +1,4 @@
-# Copyright 2025-2026 Lamco Development
+# Copyright 2025-2026 Lamco Development LLC
 #
 # Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
 # https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
@@ -12,7 +12,7 @@ version = "0.3.0"
 edition = "2021"
 authors = [
     "Greg Lamberson <greg@lamco.io>",
-    "Lamco Development <office@lamco.io>",
+    "Lamco Development LLC <office@lamco.io>",
 ]
 license = "MIT OR Apache-2.0"
 description = "no_std read-only btrfs reader for UEFI bootloaders and embedded contexts"
@@ -54,6 +54,9 @@ serde_json = "1"
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
+
+[badges]
+maintenance = { status = "actively-developed" }
 
 # ---------------------------------------------------------------------------
 # Lints — per ~/lamco-admin/shared/integrated-development/templates/rust/cargo-lints.toml

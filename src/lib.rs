@@ -1,4 +1,4 @@
-// Copyright 2025-2026 Lamco Development
+// Copyright 2025-2026 Lamco Development LLC
 //
 // Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
 // https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
@@ -6,14 +6,25 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! `no_std` read-only btrfs reader.
+//! `no_std` read-only btrfs reader for UEFI bootloaders and embedded contexts.
 //!
-//! See `docs/SPEC-LAMBUTTER.md` for the design specification and
-//! `~/lamboot-dev/docs/analysis/BTRFS-FORMAT-READONLY-REFERENCE-2026-04-27.md`
-//! for the on-disk format reference.
+//! Lambutter is the btrfs counterpart to [`ext4-view`]: a pure-Rust,
+//! allocation-aware, read-only btrfs filesystem reader for contexts that cannot
+//! link `std`. It opens regular files, symlinks, and directory listings on
+//! SINGLE / DUP / RAID1 / RAID1C3 / RAID1C4 volumes and decodes zstd, zlib, and
+//! LZO extents; unsupported profiles surface as typed errors.
+//!
+//! See the [README] for scope, validation posture, and usage; `CHANGELOG.md`
+//! for the version history.
+//!
+//! [`ext4-view`]: https://github.com/nicholasbishop/ext4-view-rs
+//! [README]: https://github.com/lamco-admin/lambutter#readme
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![deny(rustdoc::broken_intra_doc_links)]
+// Test code may panic on failure (unwrap/expect); keep the library strict.
+#![cfg_attr(test, expect(clippy::unwrap_used, clippy::expect_used))]
 
 extern crate alloc;
 

@@ -1,4 +1,4 @@
-// Copyright 2025-2026 Lamco Development
+// Copyright 2025-2026 Lamco Development LLC
 //
 // Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
 // https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
@@ -13,6 +13,9 @@
 //!
 //! Generation: `tests/fixtures/scripts/build.sh all` — requires
 //! btrfs-progs + sudo (loop mount for compressed fixtures).
+
+// Integration-test code: panicking on failure (unwrap/expect) is intended.
+#![expect(clippy::unwrap_used, clippy::expect_used, clippy::expect_fun_call)]
 
 use std::{collections::BTreeMap, fs::File, io::Read, path::PathBuf};
 
