@@ -1,4 +1,4 @@
-// Copyright 2025-2026 Lamco Development
+// Copyright 2025-2026 Lamco Development LLC
 //
 // Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
 // https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
@@ -34,7 +34,7 @@ struct FileBlock {
 }
 
 #[derive(Debug)]
-struct IoErr(#[allow(dead_code)] std::io::Error);
+struct IoErr(#[expect(dead_code)] std::io::Error);
 
 impl BlockRead for FileBlock {
     type Error = IoErr;
@@ -45,16 +45,21 @@ impl BlockRead for FileBlock {
 }
 
 fn sha256_hex(data: &[u8]) -> String {
-    let out = Sha256::digest(data);
-    let mut s = String::with_capacity(64);
-    for b in out {
-        s.push_str(&format!("{b:02x}"));
-    }
-    s
+    to_hex(&Sha256::digest(data)[..])
 }
 
 fn hex_head(data: &[u8], n: usize) -> String {
-    data.iter().take(n).map(|b| format!("{b:02x}")).collect()
+    to_hex(&data[..n.min(data.len())])
+}
+
+fn to_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for &b in bytes {
+        s.push(HEX[(b >> 4) as usize] as char);
+        s.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    s
 }
 
 fn run() -> Result<(), String> {
@@ -62,7 +67,7 @@ fn run() -> Result<(), String> {
     if args.len() < 2 || args.len() > 3 {
         return Err(format!(
             "usage: {} <device-or-image> [path-inside-fs]",
-            args.first().map(String::as_str).unwrap_or("inspect")
+            args.first().map_or("inspect", String::as_str)
         ));
     }
     let device = &args[1];

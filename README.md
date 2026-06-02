@@ -1,5 +1,10 @@
 # lambutter
 
+[![Crates.io](https://img.shields.io/crates/v/lambutter.svg)](https://crates.io/crates/lambutter)
+[![Docs.rs](https://docs.rs/lambutter/badge.svg)](https://docs.rs/lambutter)
+[![CI](https://github.com/lamco-admin/lambutter/actions/workflows/ci.yml/badge.svg)](https://github.com/lamco-admin/lambutter/actions/workflows/ci.yml)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+
 **`no_std` read-only btrfs reader for UEFI bootloaders and embedded contexts.**
 
 Lambutter is the btrfs counterpart to [`ext4-view`](https://github.com/nicholasbishop/ext4-view-rs):
@@ -10,8 +15,8 @@ bare-metal kernels, and recovery tooling.
 ## Status
 
 **v0.3.0 — feature-complete + live-validated** (see
-[`docs/SPEC-LAMBUTTER.md` §2](docs/SPEC-LAMBUTTER.md) for scope, and
-[`CHANGELOG.md`](CHANGELOG.md) for the version arc through v0.1.0 →
+[`docs/SPEC-LAMBUTTER.md` §2](https://github.com/lamco-admin/lambutter/blob/main/docs/SPEC-LAMBUTTER.md) for scope, and
+[`CHANGELOG.md`](https://github.com/lamco-admin/lambutter/blob/main/CHANGELOG.md) for the version arc through v0.1.0 →
 v0.3.0). Open and read regular files, symlinks, and directory listings
 on SINGLE / DUP / RAID1 / RAID1C3 / RAID1C4 btrfs volumes; decode zstd,
 zlib, and LZO extents; surface unsupported profiles (RAID0/10/5/6,
@@ -32,8 +37,7 @@ snapshot enumeration are tracked for v0.4.0+.
 - **Live embedded validation**: linked into [LamBoot](https://lamboot.dev)
   (Lamco's UEFI bootloader) as the native btrfs backend, booting
   openSUSE Tumbleweed end-to-end under live UEFI firmware with full
-  trust-chain attribution. See the
-  [case study](https://github.com/lamco-admin/lamboot-dev/blob/main/docs/migration/VM-102-OPENSUSE-TUMBLEWEED-BIOS-TO-UEFI-CASE-STUDY.md).
+  trust-chain attribution.
 
 ## Use
 
@@ -60,7 +64,7 @@ loop {
 For integrating from another `no_std` Rust project — including the
 `BlockRead` impl patterns for UEFI `EFI_BLOCK_IO_PROTOCOL`, file-backed
 host testing, and the standard symlink-follow pattern — see the
-[Consumer Guide](docs/CONSUMER-GUIDE.md).
+[Consumer Guide](https://github.com/lamco-admin/lambutter/blob/main/docs/CONSUMER-GUIDE.md).
 
 A worked end-to-end example lives at `examples/inspect.rs`: a host-side
 CLI that opens any block device or image file, reports the resolved
@@ -101,28 +105,26 @@ enable all three: `features = ["zstd", "zlib", "lzo"]`.
 
 ## Documentation
 
-- [`docs/SPEC-LAMBUTTER.md`](docs/SPEC-LAMBUTTER.md) — design spec, on-disk format scope
-- [`docs/FEATURES.md`](docs/FEATURES.md) — exhaustive feature inventory + non-features
-- [`docs/SUPPORTED-SCENARIOS.md`](docs/SUPPORTED-SCENARIOS.md) — distro × btrfs-config coverage matrix
-- [`docs/CONSUMER-GUIDE.md`](docs/CONSUMER-GUIDE.md) — integrating lambutter into a downstream `no_std` Rust project
-- [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) — error catalogue (symptom → cause → fix)
-- [`docs/TESTING-AND-FUZZING-PLAN.md`](docs/TESTING-AND-FUZZING-PLAN.md) — test/fuzz strategy + validation results
-- [`docs/PRE-PUBLISH-AND-TESTING-PLAN.md`](docs/PRE-PUBLISH-AND-TESTING-PLAN.md) — pre-publish hygiene checklist
-- [`CHANGELOG.md`](CHANGELOG.md) — version history
+- [`docs/SPEC-LAMBUTTER.md`](https://github.com/lamco-admin/lambutter/blob/main/docs/SPEC-LAMBUTTER.md) — design spec, on-disk format scope
+- [`docs/FEATURES.md`](https://github.com/lamco-admin/lambutter/blob/main/docs/FEATURES.md) — exhaustive feature inventory + non-features
+- [`docs/SUPPORTED-SCENARIOS.md`](https://github.com/lamco-admin/lambutter/blob/main/docs/SUPPORTED-SCENARIOS.md) — distro × btrfs-config coverage matrix
+- [`docs/CONSUMER-GUIDE.md`](https://github.com/lamco-admin/lambutter/blob/main/docs/CONSUMER-GUIDE.md) — integrating lambutter into a downstream `no_std` Rust project
+- [`docs/TROUBLESHOOTING.md`](https://github.com/lamco-admin/lambutter/blob/main/docs/TROUBLESHOOTING.md) — error catalogue (symptom → cause → fix)
+- [`docs/TESTING-AND-FUZZING-PLAN.md`](https://github.com/lamco-admin/lambutter/blob/main/docs/TESTING-AND-FUZZING-PLAN.md) — test/fuzz strategy + validation results
+- [`docs/PRE-PUBLISH-AND-TESTING-PLAN.md`](https://github.com/lamco-admin/lambutter/blob/main/docs/PRE-PUBLISH-AND-TESTING-PLAN.md) — pre-publish hygiene checklist
+- [`CHANGELOG.md`](https://github.com/lamco-admin/lambutter/blob/main/CHANGELOG.md) — version history
 
 ## License
 
 Dual-licensed under MIT or Apache-2.0, at your option. See
-[`LICENSE-MIT`](LICENSE-MIT) and [`LICENSE-APACHE`](LICENSE-APACHE).
+[`LICENSE-MIT`](https://github.com/lamco-admin/lambutter/blob/main/LICENSE-MIT) and [`LICENSE-APACHE`](https://github.com/lamco-admin/lambutter/blob/main/LICENSE-APACHE).
 
 ## Contributing
 
 Contributions welcome — particularly:
 
 - Additional fixture scenarios (`tests/fixtures/`)
-- Per-distro real-world validation (the
-  [LamBoot scenarios matrix](https://github.com/lamco-admin/lamboot-dev/blob/main/docs/migration/SCENARIOS-MATRIX.md)
-  tracks what's been live-validated across the wider ecosystem)
+- Per-distro real-world validation across the wider ecosystem
 - v0.2.x scope items: data-block CSUM_TREE verification, snapshot
   enumeration, full subvolume traversal
 

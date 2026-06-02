@@ -1,4 +1,4 @@
-// Copyright 2025-2026 Lamco Development
+// Copyright 2025-2026 Lamco Development LLC
 //
 // Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
 // https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
@@ -394,7 +394,7 @@ mod tests {
     fn synth_volume(nodesize: u32, leaf: &[u8], root_logical: u64) -> (ChunkMap, Vec<u8>) {
         // Place the leaf at physical offset == root_logical for simplicity.
         let mut device = vec![0u8; (root_logical as usize) + leaf.len()];
-        device[root_logical as usize..].copy_from_slice(&leaf);
+        device[root_logical as usize..].copy_from_slice(leaf);
 
         let mut map = ChunkMap::default();
         // Build a system chunk array entry covering [root_logical, root_logical + nodesize).
