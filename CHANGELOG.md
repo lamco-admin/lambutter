@@ -13,6 +13,16 @@ intermediate version numbers (`v0.1.2` through `v0.2.0`) document phases
 of work that did not get separate publishable releases but are useful as
 narrative milestones for anyone reading this file later.
 
+## [0.3.1] — Debian-archive dependency alignment
+
+### Changed
+
+- Relax the optional `miniz_oxide` dependency (the `zlib` feature) from `0.8` to
+  the `0.7` line. lambutter calls only `inflate::decompress_to_vec_zlib_with_limit`
+  and discards the concrete error type, so the 0.7 API is sufficient. This keeps
+  the dependency aligned with the version in the Debian archive and avoids pulling
+  a newer miniz_oxide into Debian's Rust set solely for this crate.
+
 ## [0.3.0] — Comprehensive consumer documentation + live embedded validation
 
 The first release marketed as "production-ready for embedded
