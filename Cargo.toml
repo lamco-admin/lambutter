@@ -8,7 +8,7 @@
 
 [package]
 name = "lambutter"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 authors = [
     "Greg Lamberson <greg@lamco.io>",
@@ -40,7 +40,7 @@ lzo = ["dep:lzokay"]
 [dependencies]
 bitflags = { version = "2.6", default-features = false }
 crc = { version = "3.2", default-features = false }
-miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"], optional = true }
+miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"], optional = true }
 ruzstd = { version = "0.7", default-features = false, optional = true }
 lzokay = { version = "2.0", default-features = false, features = ["decompress", "alloc"], optional = true }
 
