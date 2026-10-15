@@ -173,7 +173,7 @@ log-grep consumers. The full vocabulary:
 
 ## 4. Non-features (deliberate omissions)
 
-These are *not* bugs and will not be implemented in the 0.4.x line:
+These are *not* bugs and will not be implemented in the 0.5.x line:
 
 | Item | Why deferred / rejected |
 |---|---|

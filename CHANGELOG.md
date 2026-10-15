@@ -13,7 +13,7 @@ exist in git for `v0.1.0`, `v0.1.1`, `v0.3.0` and later releases;
 `v0.1.2` through `v0.2.0` document phases of work that did not get
 separate publishable releases.
 
-## [0.5.0] - unreleased
+## [0.5.0] - 2026-10-15
 
 New error tokens, so a minor release under the policy below.
 

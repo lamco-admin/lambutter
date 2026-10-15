@@ -355,9 +355,12 @@ sensitive contexts like bootloaders):
 4. Bump your consumer's tag/version simultaneously (lockstep is
    easier than tracking compatibility windows).
 
-For consumers using a caret requirement (`lambutter = "0.4"`):
-- Within 0.4.x: bug fixes only, per the crate's version policy. New API
+For consumers using a caret requirement (`lambutter = "0.5"`):
+- Within 0.5.x: bug fixes only, per the crate's version policy. New API
   and new error tokens come in a minor bump.
+- 0.5.0 added the error tokens `prof_other_device` and `feat_encryption`.
+  No type changed shape; code that matches on token strings sees two new
+  ones.
 - 0.4.0 was a breaking release: `Inode` became opaque and carries its
   subvolume, `DirEntry` gained `inode` and is `#[non_exhaustive]`, and
   `Error` gained `NotASubvolume`. See `CHANGELOG.md`.
@@ -401,3 +404,5 @@ LamBoot's private development repository.
   LamBoot integration through VM 102.
 - 2026-10-14: 0.4.0. Subvolumes along the path (§3.1), the
   `NotASubvolume` arm, and the 0.4 versioning notes.
+- 2026-10-15: 0.5.0. The two new refusal tokens and the 0.5 versioning
+  notes.

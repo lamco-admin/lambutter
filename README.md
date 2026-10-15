@@ -20,23 +20,27 @@ bare-metal kernels, and recovery tooling.
 
 ## Status
 
-**0.4.0.** Open and read regular files, symlinks and directory listings
+**0.5.0.** Open and read regular files, symlinks and directory listings
 on SINGLE / DUP / RAID1 / RAID1C3 / RAID1C4 btrfs volumes, at the default
 subvolume or one chosen by id or path, crossing into nested subvolumes the
-way a Linux mount does. Decodes zstd, zlib and LZO extents, and refuses
-RAID0/10/5/6, ZONED, RAID_STRIPE_TREE, REMAP_TREE and any unknown
-incompat feature with a typed error. See
+way a Linux mount does. A filesystem across several devices is read from
+the device it's given, and a chunk with no copy there is refused. Decodes
+zstd, zlib and LZO extents, and refuses RAID0/10/5/6, ZONED,
+RAID_STRIPE_TREE, REMAP_TREE, fscrypt markers and any unknown incompat
+feature with a typed error. See
 [`docs/SPEC-LAMBUTTER.md` §2](https://github.com/lamco-admin/lambutter/blob/main/docs/SPEC-LAMBUTTER.md)
 for scope and [`CHANGELOG.md`](https://github.com/lamco-admin/lambutter/blob/main/CHANGELOG.md)
 for what changed. Data-block CSUM verification and snapshot enumeration
 are not implemented.
 
 **Validation posture:**
-- 53 host unit tests across all modules
-- 12 fixture-based oracle tests on images written by the Linux kernel
+- 55 host unit tests across all modules
+- 15 fixture-based oracle tests on images written by the Linux kernel
   (uncompressed, zstd, zlib, LZO, DUP metadata, NO_HOLES sparse,
   symlinks, extents and directories spanning B-tree leaves, varied LZO
-  segments, subvolumes and snapshots, chunked reads, smoke)
+  segments, subvolumes and snapshots, chunked reads, RAID1 and single
+  data across two devices, fscrypt markers set by hand on a
+  kernel-written image, smoke)
 - 5 cargo-fuzz harnesses
 - Live host validation: `examples/inspect.rs` against live openSUSE
   Tumbleweed btrfs partition with Snapper-managed default-subvol
@@ -58,7 +62,7 @@ or in `Cargo.toml`, with every codec a `/boot` might use:
 
 ```toml
 [dependencies]
-lambutter = { version = "0.4", features = ["zstd", "zlib", "lzo"] }
+lambutter = { version = "0.5", features = ["zstd", "zlib", "lzo"] }
 ```
 
 ## Use
