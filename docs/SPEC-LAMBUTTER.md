@@ -165,8 +165,9 @@ pub enum Error {
     /// Superblock is missing, malformed, or has unsupported magic.
     BadSuperblock(SuperblockReason),
 
-    /// Encountered an incompat flag we do not implement. Currently:
-    /// `ZONED`, `RAID_STRIPE_TREE`. Carries the flag name as a stable token.
+    /// Encountered an incompat flag we do not implement: `ZONED`,
+    /// `RAID_STRIPE_TREE`, `REMAP_TREE`, or any bit lambutter doesn't know.
+    /// Carries the flag name as a stable token.
     UnsupportedFeature(&'static str),
 
     /// Encountered a chunk profile we do not implement. SINGLE/DUP/RAID1/
@@ -491,6 +492,8 @@ Tokens used in `Error` variants and trust-log integration. Stable across patch r
 | `gen_skew` | `Error::BadSuperblock` | superblock copies disagree on generation |
 | `feat_zoned` | `Error::UnsupportedFeature` | `BTRFS_FEATURE_INCOMPAT_ZONED` set |
 | `feat_raid_stripe_tree` | `Error::UnsupportedFeature` | `BTRFS_FEATURE_INCOMPAT_RAID_STRIPE_TREE` set |
+| `feat_remap_tree` | `Error::UnsupportedFeature` | `BTRFS_FEATURE_INCOMPAT_REMAP_TREE` (bit 17) set |
+| `feat_unknown_incompat` | `Error::UnsupportedFeature` | an incompat bit lambutter doesn't know is set |
 | `prof_raid0` | `Error::UnsupportedProfile` | RAID0 profile encountered |
 | `prof_raid10` | `Error::UnsupportedProfile` | RAID10 profile encountered |
 | `prof_raid5` | `Error::UnsupportedProfile` | RAID5 profile encountered |
@@ -498,7 +501,9 @@ Tokens used in `Error` variants and trust-log integration. Stable across patch r
 | `csum_xxhash` | `Error::UnsupportedChecksum` | xxhash csum type |
 | `csum_sha256` | `Error::UnsupportedChecksum` | sha256 csum type |
 | `csum_blake2` | `Error::UnsupportedChecksum` | blake2 csum type |
+| `csum_unknown` | `Error::UnsupportedChecksum` | csum type field holds no defined type |
 | `key_order` | `Error::CorruptBtree` | leaf keys not strictly ascending |
+| `separator_mismatch` | `Error::CorruptBtree` | an interior separator points at a leaf whose first key isn't past the search key |
 | `item_oob` | `Error::CorruptBtree` | item region overruns leaf bounds |
 | `child_count` | `Error::CorruptBtree` | interior node has 0 or > capacity children |
 | `infinite_recursion` | `Error::CorruptBtree` | walker depth exceeded sane bound |

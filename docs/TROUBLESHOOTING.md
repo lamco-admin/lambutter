@@ -208,7 +208,7 @@ errors deliberately.
 ### 2.4 `Error::CorruptBtree { token, logical }`
 
 **Symptom:** any tree walk returns this; common tokens are
-`key_order`, `item_region_overflow`, `child_count`, `depth_limit`.
+`key_order`, `separator_mismatch`, `item_region_overflow`, `child_count`, `depth_limit`.
 
 **Cause:** a B-tree node violates structural invariants. Either:
 - Real disk corruption (rare but possible)

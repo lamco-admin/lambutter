@@ -23,8 +23,8 @@ choice. Update at every minor version bump.
 | Highest-generation-among-valid-copies selection | ✓ | `src/superblock.rs::load` |
 | Reject bad magic | ✓ | `BadSuperblock(BadMagic)` |
 | Reject bad csum | ✓ | `BadSuperblock(BadCsum)` |
-| Reject unsupported csum_type (xxhash / sha256 / blake2) | ✓ | `BadSuperblock(UnsupportedCsumType)` |
-| Reject unsupported INCOMPAT flags (ZONED, RAID_STRIPE_TREE) | ✓ | `BadSuperblock(UnsupportedIncompat)` |
+| Reject unsupported csum_type (xxhash / sha256 / blake2), read before the CRC32C check | ✓ | `UnsupportedChecksum("csum_xxhash" / "csum_sha256" / "csum_blake2")` |
+| Reject unsupported INCOMPAT flags (ZONED, RAID_STRIPE_TREE, REMAP_TREE) and any unknown bit | ✓ | `UnsupportedFeature("feat_zoned" / "feat_raid_stripe_tree" / "feat_remap_tree" / "feat_unknown_incompat")` |
 | Reject bad geometry (sectorsize / nodesize outside power-of-two range) | ✓ | `BadSuperblock(BadGeometry)` |
 | Embedded `sys_chunk_array` bootstrap | ✓ | `src/chunk_tree.rs::parse_system_chunk_array` |
 
@@ -42,7 +42,7 @@ choice. Update at every minor version bump.
 | `RAID10` profile | ✓ (rejected) | `UnsupportedProfile("raid10")` |
 | `RAID5` profile | ✓ (rejected) | `UnsupportedProfile("raid5")` |
 | `RAID6` profile | ✓ (rejected) | `UnsupportedProfile("raid6")` |
-| Multi-device with missing local device | ✓ (rejected) | Stripe `devid` mismatch → typed error |
+| Multi-device with missing local device | ✗ (not checked) | Stripe `devid` is recorded but not compared, so a RAID1 member read through the wrong device relies on the metadata checksum to catch it. Planned |
 
 ### 1.3 B-tree walker (generic across chunk / root / fs / extent / log / csum / free-space / uuid / quota)
 
@@ -53,8 +53,8 @@ choice. Update at every minor version bump.
 | Metadata-block CRC32C verification on every read | ✓ | `src/btree.rs::read_tree_block` |
 | Bounded recursion (`MAX_TREE_DEPTH = 16`) | ✓ | Protects against malformed-tree DOS |
 | `find_exact` (exact-key match) | ✓ | `src/btree.rs::find_exact` |
-| `find_first_ge` (first key >= target) | ✓ | `src/btree.rs::find_first_ge` |
-| Cross-leaf iteration (re-descend pattern) | ✓ | Three call sites: chunk_tree, dir, file |
+| `find_first_ge` (first key >= target), continuing into the next leaf when the target sorts after every item in the leaf reached | ✓ | `src/btree.rs::find_first_ge` |
+| Cross-leaf iteration (re-descend pattern) | ✓ | Three call sites: chunk_tree, dir, file. 0.3.1 and earlier stopped the search at a leaf end, so iteration ended early across a key gap (fixture F10) |
 
 ### 1.4 Root tree
 
@@ -149,11 +149,11 @@ log-grep consumers. The full vocabulary:
 | `BadSuperblock(UnsupportedCsumType)` | — | Use a newer lambutter (if added) or different volume |
 | `BadSuperblock(UnsupportedIncompat)` | — | INCOMPAT flag we don't implement |
 | `BadSuperblock(BadGeometry)` | — | sectorsize / nodesize outside supported range |
-| `UnsupportedFeature(token)` | feature name (e.g. `"btrfs_incompat_flag"`) | Out of scope for v0.3.x |
+| `UnsupportedFeature(token)` | feature name (e.g. `"feat_zoned"`, `"feat_unknown_incompat"`) | Out of scope |
 | `UnsupportedProfile(token)` | `raid0`, `raid10`, `raid5`, `raid6` | By design |
 | `UnsupportedChecksum(token)` | csum-type name | By design |
 | `CsumMismatch { logical }` | — | Disk corruption at that bytenr |
-| `CorruptBtree { token, logical }` | `key_order`, `item_region_overflow`, `child_count`, `depth_limit` | Disk corruption or malicious input |
+| `CorruptBtree { token, logical }` | `key_order`, `separator_mismatch`, `item_region_overflow`, `child_count`, `depth_limit` | Disk corruption or malicious input |
 | `NotFound` | — | Caller should check; not always an error |
 | `NotARegularFile` | — | Path resolves to dir/symlink/special; caller should use the right API |
 | `NotASymlink` | — | `read_link` called on non-symlink |
@@ -208,7 +208,7 @@ See `TESTING-AND-FUZZING-PLAN.md` for the full strategy. Summary:
 | Layer | Coverage |
 |---|---|
 | A — Host unit tests | 36 tests, all modules |
-| B — Fixture-based oracle | 8 `mkfs.btrfs`-generated fixtures (F1 SINGLE, F2 zstd, F3 zlib, F4 LZO, F5 DUP+SINGLE, F8 NO_HOLES, F9 symlinks, smoke) |
+| B — Fixture-based oracle | 10 `mkfs.btrfs`-generated fixtures (F1 SINGLE, F2 zstd, F3 zlib, F4 LZO, F5 DUP+SINGLE, F8 NO_HOLES, F9 symlinks, F10 multi-leaf extents and directory, F11 LZO segments, smoke) |
 | C — Fuzz harnesses | 5 cargo-fuzz targets, 1-hour smoke run zero crashes |
 | D — Live host validation | `examples/inspect.rs` against live openSUSE Tumbleweed sda2 — 6 paths, all sha256-byte-identical to kernel oracle |
 | E — Embedded-context live validation | Linked into LamBoot v0.9.1; live UEFI boot of openSUSE Tumbleweed VM 102 with full boot-trust.log audit chain |
