@@ -19,8 +19,8 @@ use crate::{
     error::{Error, Result},
     format::{
         constants::{
-            COMPRESS_NONE, EXTENT_DATA_KEY, FILE_EXTENT_INLINE, FILE_EXTENT_PREALLOC,
-            FILE_EXTENT_REG, INODE_ITEM_KEY, MAX_DECOMPRESSED_EXTENT_BYTES,
+            COMPRESS_NONE, EMPTY_SUBVOL_DIR_OBJECTID, EXTENT_DATA_KEY, FILE_EXTENT_INLINE,
+            FILE_EXTENT_PREALLOC, FILE_EXTENT_REG, INODE_ITEM_KEY, MAX_DECOMPRESSED_EXTENT_BYTES,
         },
         repr::{DiskKey, ExtentDataHeader, ExtentDataRegular, InodeItem},
     },
@@ -43,6 +43,19 @@ pub(crate) fn read_metadata<R: BlockRead>(
     fs_tree_root: u64,
     objectid: u64,
 ) -> Result<Metadata> {
+    if objectid == EMPTY_SUBVOL_DIR_OBJECTID {
+        // Has no inode item; Linux presents it as an empty directory, mode
+        // 0755, owned by root.
+        return Ok(Metadata {
+            size: 0,
+            nbytes: 0,
+            nlink: 1,
+            mode: 0o040_755,
+            uid: 0,
+            gid: 0,
+            generation: 0,
+        });
+    }
     let target = DiskKey {
         objectid,
         item_type: INODE_ITEM_KEY,

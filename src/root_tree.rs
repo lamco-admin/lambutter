@@ -28,10 +28,13 @@ use crate::{
     error::{Error, Result},
     format::{
         constants::{
-            DIR_ITEM_KEY, FS_TREE_OBJECTID, NAME_HASH_SEED, ROOT_ITEM_KEY, ROOT_TREE_DIR_OBJECTID,
+            DIR_ITEM_KEY, FIRST_FREE_OBJECTID, FS_TREE_OBJECTID, NAME_HASH_SEED, ROOT_ITEM_KEY,
+            ROOT_REF_KEY, ROOT_TREE_DIR_OBJECTID,
         },
         repr::{DirEntry, DiskKey, RootItem},
     },
+    inode::Inode,
+    util::{read_le_u16, read_le_u64},
 };
 
 /// Compute the btrfs name-hash for a directory entry. Uses CRC32C with the
@@ -40,15 +43,15 @@ pub(crate) fn name_hash(name: &[u8]) -> u64 {
     u64::from(crc32c_with_seed(NAME_HASH_SEED, name))
 }
 
-/// Resolve the active subvolume's FS-tree root by walking the root tree.
-/// Returns `(fs_tree_root_logical, fs_tree_level, subvol_objectid)`.
+/// Resolve the active default subvolume's root directory by walking the
+/// root tree.
 pub(crate) fn resolve_default_subvol<R: BlockRead>(
     reader: &mut R,
     chunk_map: &ChunkMap,
     nodesize: u32,
     root_tree_root: u64,
     superblock_default_objectid: u64,
-) -> Result<(u64, u8, u64)> {
+) -> Result<Inode> {
     let subvol_objectid =
         match lookup_default_dir_item(reader, chunk_map, nodesize, root_tree_root)? {
             Some(oid) => oid,
@@ -63,13 +66,85 @@ pub(crate) fn resolve_default_subvol<R: BlockRead>(
             }
         };
 
-    let root_item = lookup_root_item(reader, chunk_map, nodesize, root_tree_root, subvol_objectid)?
-        .ok_or(Error::CorruptBtree {
+    match subvol_root(reader, chunk_map, nodesize, root_tree_root, subvol_objectid) {
+        Err(Error::NotFound) => Err(Error::CorruptBtree {
             token: "subvol_root_missing",
             logical: root_tree_root,
-        })?;
-    Ok((root_item.bytenr, root_item.level, subvol_objectid))
+        }),
+        other => other,
+    }
 }
+
+/// The root directory of subvolume `id`, or `NotFound` when the root tree
+/// has no live subvolume by that id. A root with no references left is a
+/// deleted subvolume awaiting cleanup, which Linux won't open either.
+pub(crate) fn subvol_root<R: BlockRead>(
+    reader: &mut R,
+    chunk_map: &ChunkMap,
+    nodesize: u32,
+    root_tree_root: u64,
+    id: u64,
+) -> Result<Inode> {
+    let root_item = lookup_root_item(reader, chunk_map, nodesize, root_tree_root, id)?
+        .ok_or(Error::NotFound)?;
+    if root_item.refs == 0 {
+        return Err(Error::NotFound);
+    }
+    Ok(Inode {
+        subvol: id,
+        tree_root: root_item.bytenr,
+        objectid: FIRST_FREE_OBJECTID,
+    })
+}
+
+/// Whether the root tree links subvolume `child` into subvolume `parent` as
+/// entry `name` of directory `dirid`. The link is a `ROOT_REF` item keyed
+/// `(parent, ROOT_REF, child)` holding the directory, a sequence number and
+/// the name. A snapshot copies its source's entry for a nested subvolume but
+/// gets no such link, and Linux shows that entry as an empty directory.
+pub(crate) fn root_ref_links<R: BlockRead>(
+    reader: &mut R,
+    chunk_map: &ChunkMap,
+    nodesize: u32,
+    root_tree_root: u64,
+    link: SubvolLink<'_>,
+) -> Result<bool> {
+    let target = DiskKey {
+        objectid: link.parent,
+        item_type: ROOT_REF_KEY,
+        offset: link.child,
+    };
+    let Some((leaf, idx)) = find_exact(reader, chunk_map, nodesize, root_tree_root, &target)?
+    else {
+        return Ok(false);
+    };
+    let data = leaf.leaf_item_data(leaf.leaf_item(idx)?)?;
+    let short = Error::CorruptBtree {
+        token: "root_ref_short",
+        logical: leaf.header.bytenr,
+    };
+    if data.len() < ROOT_REF_HEADER {
+        return Err(short);
+    }
+    let dirid = read_le_u64(data, 0);
+    let name_len = usize::from(read_le_u16(data, 16));
+    let name = data
+        .get(ROOT_REF_HEADER..ROOT_REF_HEADER + name_len)
+        .ok_or(short)?;
+    Ok(dirid == link.dirid && name == link.name)
+}
+
+/// A subvolume entry as a directory holds it, to check against `ROOT_REF`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SubvolLink<'a> {
+    pub(crate) parent: u64,
+    pub(crate) dirid: u64,
+    pub(crate) name: &'a [u8],
+    pub(crate) child: u64,
+}
+
+/// `btrfs_root_ref`: dirid (8), sequence (8), name length (2), then the name.
+const ROOT_REF_HEADER: usize = 18;
 
 /// Look up the DIR_ITEM `"default"` at `(ROOT_TREE_DIR_OBJECTID, DIR_ITEM, hash)`.
 /// Returns `Some(subvol_objectid)` if found, `None` otherwise.

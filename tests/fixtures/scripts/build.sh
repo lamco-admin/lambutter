@@ -354,6 +354,79 @@ build_f11_lzo_segments() {
         "/words.txt" "$sha_words"
 }
 
+build_f12_subvolumes() {
+    echo "=== F12 subvolumes ==="
+    # Subvolume ids follow creation order: boot 256, @ 257, @/var 258,
+    # @snap 259. boot/etc/hello differs from the top level's etc/hello, so a
+    # reader that resolves inside the wrong tree reads the wrong file. @snap
+    # is a snapshot of @, so its var entry names subvolume 258 without a
+    # root-tree link, and Linux shows it as an empty directory.
+    local content="$WORK/f12-content"
+    mkdir -p "$content"
+    seq 1 20000 | awk '{ printf "kernel image line %06d\n", $1 }' > "$content/vmlinuz-1"
+    printf 'top-level hello\n' > "$content/top-hello"
+    printf 'boot subvolume hello\n' > "$content/boot-hello"
+    printf 'title Entry A\nlinux /vmlinuz-1\n' > "$content/a.conf"
+    printf 'NAME=fixture\n' > "$content/os-release"
+    printf 'nested subvolume log\n' > "$content/log.txt"
+
+    local img="$WORK/f12.img" m="$WORK/mnt"
+    truncate -s 128M "$img"
+    mkfs.btrfs -q -f --nodesize 16384 --sectorsize 4096 "$img"
+    mkdir -p "$m"
+    sudo mount -o loop "$img" "$m"
+    sudo mkdir "$m/etc"
+    sudo cp "$content/top-hello" "$m/etc/hello"
+    sudo btrfs -q subvolume create "$m/boot"
+    sudo mkdir -p "$m/boot/loader/entries" "$m/boot/etc"
+    sudo cp "$content/vmlinuz-1" "$m/boot/vmlinuz-1"
+    sudo cp "$content/a.conf" "$m/boot/loader/entries/a.conf"
+    sudo cp "$content/boot-hello" "$m/boot/etc/hello"
+    sudo btrfs -q subvolume create "$m/@"
+    sudo mkdir "$m/@/etc"
+    sudo cp "$content/os-release" "$m/@/etc/os-release"
+    sudo btrfs -q subvolume create "$m/@/var"
+    sudo cp "$content/log.txt" "$m/@/var/log.txt"
+    sudo btrfs -q subvolume snapshot "$m/@" "$m/@snap"
+    sudo btrfs -q subvolume set-default 257 "$m"
+    sudo sync
+    # The layout the test expects, as Linux reports it.
+    [ "$(sudo btrfs inspect-internal rootid "$m/boot")" = 256 ]
+    [ "$(sudo btrfs inspect-internal rootid "$m/@")" = 257 ]
+    [ "$(sudo btrfs inspect-internal rootid "$m/@/var")" = 258 ]
+    [ "$(sudo btrfs inspect-internal rootid "$m/@snap")" = 259 ]
+    [ -d "$m/@snap/var" ] && [ -z "$(sudo ls -A "$m/@snap/var")" ]
+    sudo umount "$m"
+    sudo mount -o loop "$img" "$m"
+    [ "$(sudo cat "$m/etc/os-release")" = "NAME=fixture" ]
+    sudo umount "$m"
+
+    sha() { sha256sum < "$1" | awk '{print $1}'; }
+    compress_fixture "$img" "$DATA/f12_subvolumes.img.zst"
+    cat > "$DATA/f12_subvolumes.expected.json" <<EOF
+{
+  "fixture": "f12_subvolumes",
+  "files": {
+    "/etc/hello": "$(sha "$content/top-hello")",
+    "/boot/vmlinuz-1": "$(sha "$content/vmlinuz-1")",
+    "/boot/etc/hello": "$(sha "$content/boot-hello")",
+    "/boot/loader/entries/a.conf": "$(sha "$content/a.conf")",
+    "/@/etc/os-release": "$(sha "$content/os-release")",
+    "/@/var/log.txt": "$(sha "$content/log.txt")"
+  },
+  "subvols": {
+    "/": 5,
+    "/boot": 256,
+    "/@": 257,
+    "/@/var": 258,
+    "/@snap": 259
+  },
+  "default_subvol": 257,
+  "empty_dirs": ["/@snap/var"]
+}
+EOF
+}
+
 # --------------------------------------------------------------------------
 # Driver
 # --------------------------------------------------------------------------
@@ -370,6 +443,7 @@ case "${1:-all}" in
     f9) build_f9_symlink_chain ;;
     f10) build_f10_multi_leaf ;;
     f11) build_f11_lzo_segments ;;
+    f12) build_f12_subvolumes ;;
     all)
         build_f1_single_uncompressed
         build_f2_single_zstd
@@ -380,8 +454,9 @@ case "${1:-all}" in
         build_f9_symlink_chain
         build_f10_multi_leaf
         build_f11_lzo_segments
+        build_f12_subvolumes
         ;;
-    *) echo "Usage: $0 [all|f1|f2|f3|f4|f5|f8|f9|f10|f11]" >&2; exit 2 ;;
+    *) echo "Usage: $0 [all|f1|f2|f3|f4|f5|f8|f9|f10|f11|f12]" >&2; exit 2 ;;
 esac
 
 echo "Done. Fixtures in $DATA/"

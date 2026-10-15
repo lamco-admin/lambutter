@@ -92,7 +92,7 @@ fn run() -> Result<(), String> {
     let reader = FileBlock { f };
     let mut fs = Btrfs::open(reader, size).map_err(|e| format!("Btrfs::open: {e:?}"))?;
 
-    println!("default subvol objectid: {}", fs.default_subvol_objectid());
+    println!("subvolume:               {}", fs.subvolume());
 
     if let Some(p) = target_path {
         let bp = Path::new(p.as_bytes())
@@ -103,7 +103,11 @@ fn run() -> Result<(), String> {
             .map_err(|e| format!("metadata({p}): {e:?}"))?;
         println!();
         println!("path:                    {p}");
-        println!("inode objectid:          {}", inode.objectid);
+        println!(
+            "inode:                   {} in subvolume {}",
+            inode.objectid(),
+            inode.subvolume()
+        );
         println!(
             "mode:                    0o{:o} ({})",
             md.mode,

@@ -72,6 +72,11 @@ pub enum Error {
     /// Path resolved but does not point at a symbolic link.
     NotASymlink,
 
+    /// [`Btrfs::open_subvol_path`](crate::Btrfs::open_subvol_path) was given a
+    /// path that resolves to something other than a subvolume root, which a
+    /// Linux `subvol=` mount refuses as well.
+    NotASubvolume,
+
     /// Decompression of a compressed extent failed.
     BadCompression {
         /// Stable token: `comp_zlib` / `comp_lzo` / `comp_zstd`.
@@ -125,6 +130,7 @@ impl fmt::Display for Error {
             Self::NotFound => write!(f, "path component not found"),
             Self::NotARegularFile => write!(f, "path does not resolve to a regular file"),
             Self::NotASymlink => write!(f, "path does not resolve to a symlink"),
+            Self::NotASubvolume => write!(f, "path does not resolve to a subvolume root"),
             Self::BadCompression { algorithm } => write!(f, "bad compressed extent ({algorithm})"),
             Self::OutOfMemory { token } => write!(f, "out of memory ({token})"),
         }

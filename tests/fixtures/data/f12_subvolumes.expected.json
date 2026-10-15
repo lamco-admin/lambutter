@@ -1,0 +1,20 @@
+{
+  "fixture": "f12_subvolumes",
+  "files": {
+    "/etc/hello": "1cb2ad6556e948b228457a6b88995df3f07d24bb873f6079510fe6e0a93afff3",
+    "/boot/vmlinuz-1": "a41078a76ba918eec502621e801cb50970ce9577b5aef6db43cda4f71ac7fcb9",
+    "/boot/etc/hello": "181baf9a17db32af77db7167433b3be5dc23d09e1cb8cd5ef7335cf7ce82e534",
+    "/boot/loader/entries/a.conf": "99d2063f731f447c5f2efd74a5cada3d503a79ca69e59d8f4fc5a77352a8dfee",
+    "/@/etc/os-release": "9db2937085cfed64564d0f186e60142bc16a4582eb743f3b6a72573dde2aeaac",
+    "/@/var/log.txt": "64770b03b63c9262eb0eced6a4d9716af1e66947fb6fc0158e2a7b821a1536db"
+  },
+  "subvols": {
+    "/": 5,
+    "/boot": 256,
+    "/@": 257,
+    "/@/var": 258,
+    "/@snap": 259
+  },
+  "default_subvol": 257,
+  "empty_dirs": ["/@snap/var"]
+}

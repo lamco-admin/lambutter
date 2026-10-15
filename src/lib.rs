@@ -53,6 +53,7 @@ pub use block_read::{BlockRead, SliceReadError};
 use chunk_tree::ChunkMap;
 pub use dir::DirEntry;
 pub use error::{Error, Result, SuperblockReason};
+use format::constants::{FIRST_FREE_OBJECTID, FS_TREE_OBJECTID};
 pub use inode::{Inode, Metadata};
 pub use path::Path;
 
@@ -87,24 +88,84 @@ pub mod __fuzz_internals {
 
 /// A mounted, read-only btrfs filesystem.
 ///
-/// Construct via [`Btrfs::open`], then resolve paths and read files using
-/// the methods below. The instance owns the block reader for its lifetime;
-/// drop the `Btrfs` to release it.
+/// Construct via [`Btrfs::open`] (the default subvolume, as a plain Linux
+/// mount sees it) or [`Btrfs::open_subvol_id`] / [`Btrfs::open_subvol_path`]
+/// (a chosen subvolume, as `subvolid=` and `subvol=` mount it), then resolve
+/// paths and read files using the methods below. Paths cross into nested
+/// subvolumes the way a mount shows them. The instance owns the block reader
+/// for its lifetime; drop the `Btrfs` to release it.
 pub struct Btrfs<R: BlockRead> {
     reader: R,
     chunk_map: ChunkMap,
     geometry: file::Geometry,
-    fs_tree_root: u64,
-    /// Subvolume objectid that was selected as the active default. Useful
-    /// for diagnostics; the FS tree root is what actual reads go through.
-    default_subvol_objectid: u64,
+    /// Logical address of the root tree, for crossing into subvolumes.
+    root_tree_root: u64,
+    /// Root directory of the subvolume this instance was opened at.
+    root: Inode,
 }
 
 impl<R: BlockRead> Btrfs<R> {
-    /// Open a btrfs filesystem on top of `reader`. `device_size_bytes` is
-    /// the byte length of the underlying volume; lambutter consults it to
-    /// decide which superblock copies are addressable.
-    pub fn open(mut reader: R, device_size_bytes: u64) -> Result<Self> {
+    /// Open a btrfs filesystem on top of `reader`, at its default subvolume.
+    /// `device_size_bytes` is the byte length of the underlying volume;
+    /// lambutter consults it to decide which superblock copies are
+    /// addressable.
+    pub fn open(reader: R, device_size_bytes: u64) -> Result<Self> {
+        let (mut fs, default_hint) = Self::mount(reader, device_size_bytes)?;
+        fs.root = root_tree::resolve_default_subvol(
+            &mut fs.reader,
+            &fs.chunk_map,
+            fs.geometry.nodesize,
+            fs.root_tree_root,
+            default_hint,
+        )?;
+        Ok(fs)
+    }
+
+    /// Open a btrfs filesystem at the subvolume with id `id`, as a Linux
+    /// `subvolid=` mount does. Id 5 is the top level. Returns
+    /// [`Error::NotFound`] when no live subvolume has that id.
+    pub fn open_subvol_id(reader: R, device_size_bytes: u64, id: u64) -> Result<Self> {
+        let (mut fs, _) = Self::mount(reader, device_size_bytes)?;
+        fs.root = root_tree::subvol_root(
+            &mut fs.reader,
+            &fs.chunk_map,
+            fs.geometry.nodesize,
+            fs.root_tree_root,
+            id,
+        )?;
+        Ok(fs)
+    }
+
+    /// Open a btrfs filesystem at the subvolume `path` names, as a Linux
+    /// `subvol=` mount does: the path is taken from the top level, whatever
+    /// the default subvolume is, and `/` is the top level itself. Returns
+    /// [`Error::NotASubvolume`] when the path names anything but a
+    /// subvolume's root directory.
+    pub fn open_subvol_path(reader: R, device_size_bytes: u64, path: Path<'_>) -> Result<Self> {
+        let (mut fs, _) = Self::mount(reader, device_size_bytes)?;
+        let top = root_tree::subvol_root(
+            &mut fs.reader,
+            &fs.chunk_map,
+            fs.geometry.nodesize,
+            fs.root_tree_root,
+            FS_TREE_OBJECTID,
+        )?;
+        let trees = resolve::Trees {
+            chunk_map: &fs.chunk_map,
+            nodesize: fs.geometry.nodesize,
+            root_tree_root: fs.root_tree_root,
+        };
+        let target = resolve::resolve_path(&mut fs.reader, trees, top, path)?;
+        if target.objectid != FIRST_FREE_OBJECTID {
+            return Err(Error::NotASubvolume);
+        }
+        fs.root = target;
+        Ok(fs)
+    }
+
+    /// Everything an open needs before choosing a subvolume: the superblock,
+    /// the full chunk map, and the superblock's default-subvolume hint.
+    fn mount(mut reader: R, device_size_bytes: u64) -> Result<(Self, u64)> {
         let sb = superblock::load(&mut reader, device_size_bytes)?;
 
         let mut chunk_map = ChunkMap::default();
@@ -121,44 +182,49 @@ impl<R: BlockRead> Btrfs<R> {
             sb.chunk_root,
         )?;
 
-        // Resolve the active default subvolume's FS tree root.
-        let (fs_tree_root, _fs_tree_level, default_subvol_objectid) =
-            root_tree::resolve_default_subvol(
-                &mut reader,
-                &chunk_map,
-                sb.nodesize,
-                sb.root,
-                sb.root_dir_objectid,
-            )?;
-
-        Ok(Self {
+        let fs = Self {
             reader,
             chunk_map,
             geometry: file::Geometry {
                 nodesize: sb.nodesize,
                 sectorsize: sb.sectorsize,
             },
-            fs_tree_root,
-            default_subvol_objectid,
-        })
+            root_tree_root: sb.root,
+            // Replaced by the caller once it has chosen the subvolume.
+            root: Inode {
+                subvol: FS_TREE_OBJECTID,
+                tree_root: 0,
+                objectid: FIRST_FREE_OBJECTID,
+            },
+        };
+        Ok((fs, sb.root_dir_objectid))
     }
 
-    /// Subvolume objectid resolved as the default at mount time. For audit /
-    /// diagnostic use.
+    /// Id of the subvolume this instance was opened at: the default one for
+    /// [`Btrfs::open`], the requested one otherwise. For audit / diagnostic
+    /// use.
+    pub fn subvolume(&self) -> u64 {
+        self.root.subvol
+    }
+
+    /// The subvolume [`Btrfs::open`] selected.
+    #[deprecated(
+        since = "0.4.0",
+        note = "use `subvolume`, which also covers `open_subvol_*`"
+    )]
     pub fn default_subvol_objectid(&self) -> u64 {
-        self.default_subvol_objectid
+        self.root.subvol
     }
 
-    /// Resolve `path` to an inode within the active subvolume.
+    /// Resolve `path` from the root of the subvolume this instance was
+    /// opened at, crossing into nested subvolumes on the way.
     pub fn resolve(&mut self, path: Path<'_>) -> Result<Inode> {
-        let objectid = resolve::resolve_path(
-            &mut self.reader,
-            &self.chunk_map,
-            self.geometry.nodesize,
-            self.fs_tree_root,
-            path,
-        )?;
-        Ok(Inode { objectid })
+        let trees = resolve::Trees {
+            chunk_map: &self.chunk_map,
+            nodesize: self.geometry.nodesize,
+            root_tree_root: self.root_tree_root,
+        };
+        resolve::resolve_path(&mut self.reader, trees, self.root, path)
     }
 
     /// Read inode metadata.
@@ -167,7 +233,7 @@ impl<R: BlockRead> Btrfs<R> {
             &mut self.reader,
             &self.chunk_map,
             self.geometry.nodesize,
-            self.fs_tree_root,
+            inode.tree_root,
             inode.objectid,
         )
     }
@@ -183,7 +249,7 @@ impl<R: BlockRead> Btrfs<R> {
             &mut self.reader,
             &self.chunk_map,
             self.geometry,
-            self.fs_tree_root,
+            inode.tree_root,
             inode.objectid,
         )
     }
@@ -201,7 +267,7 @@ impl<R: BlockRead> Btrfs<R> {
             &mut self.reader,
             &self.chunk_map,
             self.geometry,
-            self.fs_tree_root,
+            inode.tree_root,
             inode.objectid,
             offset,
             buf,
@@ -217,7 +283,7 @@ impl<R: BlockRead> Btrfs<R> {
             &mut self.reader,
             &self.chunk_map,
             self.geometry,
-            self.fs_tree_root,
+            inode.tree_root,
             inode.objectid,
         )
     }
@@ -225,12 +291,11 @@ impl<R: BlockRead> Btrfs<R> {
     /// Iterate the entries of the directory at `path`.
     pub fn read_dir(&mut self, path: Path<'_>) -> Result<Vec<DirEntry>> {
         let inode = self.resolve(path)?;
-        dir::read_dir(
-            &mut self.reader,
-            &self.chunk_map,
-            self.geometry.nodesize,
-            self.fs_tree_root,
-            inode.objectid,
-        )
+        let trees = resolve::Trees {
+            chunk_map: &self.chunk_map,
+            nodesize: self.geometry.nodesize,
+            root_tree_root: self.root_tree_root,
+        };
+        dir::read_dir(&mut self.reader, trees, inode)
     }
 }

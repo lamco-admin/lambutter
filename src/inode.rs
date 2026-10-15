@@ -8,13 +8,32 @@
 
 //! Inode handle and metadata accessor.
 
-/// An inode within the active subvolume. Currently a thin newtype wrapping
-/// the inode objectid; future versions may carry cached metadata.
+/// A file, directory or symlink: the subvolume that holds it and its inode
+/// number there. Inode numbers repeat across subvolumes (every subvolume's
+/// root directory is 256), so the number alone doesn't name a file. Get one
+/// from [`Btrfs::resolve`](crate::Btrfs::resolve) or a
+/// [`DirEntry`](crate::DirEntry).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Inode {
-    /// Inode objectid (matches the `objectid` field of the corresponding
-    /// `INODE_ITEM` key in the FS tree).
-    pub objectid: u64,
+    pub(crate) subvol: u64,
+    /// Logical address of the subvolume tree's root node, looked up once when
+    /// the walk entered the subvolume.
+    pub(crate) tree_root: u64,
+    pub(crate) objectid: u64,
+}
+
+impl Inode {
+    /// Inode number within its subvolume (the `objectid` of its
+    /// `INODE_ITEM`).
+    pub fn objectid(&self) -> u64 {
+        self.objectid
+    }
+
+    /// Id of the subvolume that holds it: 5 for the top level, 256 and up
+    /// for the others.
+    pub fn subvolume(&self) -> u64 {
+        self.subvol
+    }
 }
 
 /// Metadata accessor — analogous to `std::fs::Metadata` for callers.

@@ -104,6 +104,11 @@ pub(crate) const FREE_SPACE_TREE_OBJECTID: u64 = 10;
 /// First valid user-allocated objectid for subvolumes.
 pub(crate) const FIRST_FREE_OBJECTID: u64 = 256;
 
+/// Inode number of the empty directory Linux shows in place of a subvolume
+/// entry the root tree doesn't link there, which is what a snapshot holds for
+/// a subvolume nested in its source. No real inode in an FS tree has it.
+pub(crate) const EMPTY_SUBVOL_DIR_OBJECTID: u64 = 2;
+
 /// `DEV_ITEMS_OBJECTID` — pseudo-objectid that owns DEV_ITEM keys in the
 /// chunk tree.
 pub(crate) const DEV_ITEMS_OBJECTID: u64 = 1;

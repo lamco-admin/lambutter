@@ -367,6 +367,108 @@ fn f11_lzo_segments_reads_kernel_padded_segments() {
     }
 }
 
+#[derive(serde::Deserialize)]
+struct SubvolExpected {
+    files: BTreeMap<String, String>,
+    subvols: BTreeMap<String, u64>,
+    default_subvol: u64,
+    empty_dirs: Vec<String>,
+}
+
+fn path(p: &str) -> Path<'_> {
+    Path::new(p.as_bytes()).unwrap()
+}
+
+#[test]
+fn f12_subvolumes_cross_and_open_like_a_linux_mount() {
+    let img = load_image("f12_subvolumes");
+    let s = std::fs::read_to_string(fixture_dir().join("f12_subvolumes.expected.json")).unwrap();
+    let expected: SubvolExpected = serde_json::from_str(&s).unwrap();
+    let reader: &[u8] = &img;
+    let len = img.len() as u64;
+
+    // The top level, as `subvolid=5` mounts it: every path crosses into the
+    // subvolume it names. /boot/etc/hello must not alias /etc/hello.
+    let mut top = Btrfs::open_subvol_id(reader, len, 5).expect("open top level");
+    assert_eq!(top.subvolume(), 5);
+    for (p, sha) in &expected.files {
+        let whole = top.read_file(path(p)).expect(&format!("read {p}"));
+        assert_eq!(sha256_hex(&whole), *sha, "read_file {p}");
+        assert_eq!(
+            sha256_hex(&read_chunked(&mut top, p)),
+            *sha,
+            "read_file_at {p}"
+        );
+    }
+    assert_ne!(
+        expected.files["/etc/hello"],
+        expected.files["/boot/etc/hello"]
+    );
+    for (p, id) in &expected.subvols {
+        let inode = top.resolve(path(p)).expect(&format!("resolve {p}"));
+        assert_eq!((inode.subvolume(), inode.objectid()), (*id, 256), "{p}");
+    }
+    let listing = top.read_dir(path("/")).unwrap();
+    let boot = listing
+        .iter()
+        .find(|e| e.name == b"boot")
+        .expect("boot entry");
+    assert_eq!(boot.inode.subvolume(), 256);
+    assert_eq!(boot.inode_number, 256, "readdir reports the subvolume id");
+    assert!(top.metadata(&boot.inode).unwrap().is_dir());
+
+    // A snapshot's copy of a nested subvolume's entry is an empty directory.
+    for p in &expected.empty_dirs {
+        let inode = top.resolve(path(p)).unwrap();
+        assert!(top.metadata(&inode).unwrap().is_dir(), "{p}");
+        assert!(top.read_dir(path(p)).unwrap().is_empty(), "{p}");
+        let inside = format!("{p}/log.txt");
+        assert_eq!(
+            top.read_file(path(&inside)),
+            Err(lambutter::Error::NotFound)
+        );
+    }
+
+    // The default subvolume, as a plain mount sees it, crossing into @/var.
+    let mut default = Btrfs::open(reader, len).expect("open default");
+    assert_eq!(default.subvolume(), expected.default_subvol);
+    let os = default.read_file(path("/etc/os-release")).unwrap();
+    assert_eq!(sha256_hex(&os), expected.files["/@/etc/os-release"]);
+    let log = default.read_file(path("/var/log.txt")).unwrap();
+    assert_eq!(sha256_hex(&log), expected.files["/@/var/log.txt"]);
+
+    // `subvol=` and `subvolid=` land on the same root.
+    let by_path = Btrfs::open_subvol_path(reader, len, path("/boot")).expect("subvol=/boot");
+    assert_eq!(by_path.subvolume(), 256);
+    let mut by_id = Btrfs::open_subvol_id(reader, len, 256).expect("subvolid=256");
+    let vmlinuz = by_id.read_file(path("/vmlinuz-1")).unwrap();
+    assert_eq!(sha256_hex(&vmlinuz), expected.files["/boot/vmlinuz-1"]);
+    let mut nested = Btrfs::open_subvol_path(reader, len, path("/@/var")).unwrap();
+    assert_eq!(nested.subvolume(), 258);
+    let log = nested.read_file(path("/log.txt")).unwrap();
+    assert_eq!(sha256_hex(&log), expected.files["/@/var/log.txt"]);
+    let top_again = Btrfs::open_subvol_path(reader, len, path("/")).unwrap();
+    assert_eq!(top_again.subvolume(), 5);
+
+    // What Linux refuses, refused the same way.
+    assert!(matches!(
+        Btrfs::open_subvol_path(reader, len, path("/etc")),
+        Err(lambutter::Error::NotASubvolume)
+    ));
+    assert!(matches!(
+        Btrfs::open_subvol_path(reader, len, path("/@snap/var")),
+        Err(lambutter::Error::NotASubvolume)
+    ));
+    assert!(matches!(
+        Btrfs::open_subvol_path(reader, len, path("/missing")),
+        Err(lambutter::Error::NotFound)
+    ));
+    assert!(matches!(
+        Btrfs::open_subvol_id(reader, len, 9999),
+        Err(lambutter::Error::NotFound)
+    ));
+}
+
 #[test]
 fn opening_invalid_image_returns_error_not_panic() {
     // Random bytes the size of a real volume — must NEVER panic.
