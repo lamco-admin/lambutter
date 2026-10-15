@@ -127,6 +127,6 @@ mod tests {
     fn root_path_yields_no_components() {
         let p = Path::new(b"/").unwrap();
         let parts: alloc::vec::Vec<&[u8]> = p.components().collect();
-        assert!(parts.is_empty());
+        assert_eq!(parts, [] as [&[u8]; 0]);
     }
 }

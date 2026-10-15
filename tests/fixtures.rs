@@ -30,6 +30,13 @@ struct Expected {
     symlinks: BTreeMap<String, String>,
     /// Directory path to the number of entries `read_dir` must return.
     #[serde(default)]
+    #[cfg_attr(
+        not(feature = "zstd"),
+        expect(
+            dead_code,
+            reason = "only the zstd-gated F10 test checks directory counts"
+        )
+    )]
     dirs: BTreeMap<String, usize>,
 }
 

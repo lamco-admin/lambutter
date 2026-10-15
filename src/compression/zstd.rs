@@ -80,7 +80,7 @@ mod tests {
         let mut dst = Vec::new();
         let result = decode(b"\x00\x00\x00\x00", &mut dst);
         assert!(result.is_ok());
-        assert!(dst.is_empty());
+        assert_eq!(dst, [] as [u8; 0]);
     }
 
     #[test]
