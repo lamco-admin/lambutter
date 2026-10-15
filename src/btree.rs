@@ -201,7 +201,7 @@ pub(crate) fn find_exact<R: BlockRead>(
     root_logical: u64,
     target: &DiskKey,
 ) -> Result<Option<(TreeBlock, u32)>> {
-    let leaf = descend_to_leaf(reader, chunk_map, nodesize, root_logical, target)?;
+    let (leaf, _) = descend_to_leaf(reader, chunk_map, nodesize, root_logical, target)?;
 
     if leaf.header.nritems == 0 {
         return Ok(None);
@@ -221,7 +221,11 @@ pub(crate) fn find_exact<R: BlockRead>(
 
 /// Find the first leaf item with key `>= target`, suitable as the start of
 /// an iteration. Returns `Ok(Some((leaf, item_index)))`, or `Ok(None)` if
-/// the target is past the rightmost leaf in the tree.
+/// the target is past the last item in the tree.
+///
+/// The leaf a descent reaches holds the greatest key `<= target`, so when
+/// every item in it is smaller, the answer is the first item of the next
+/// leaf, whose first key is the separator to the right of the path taken.
 pub(crate) fn find_first_ge<R: BlockRead>(
     reader: &mut R,
     chunk_map: &ChunkMap,
@@ -229,27 +233,38 @@ pub(crate) fn find_first_ge<R: BlockRead>(
     root_logical: u64,
     target: &DiskKey,
 ) -> Result<Option<(TreeBlock, u32)>> {
-    let leaf = descend_to_leaf(reader, chunk_map, nodesize, root_logical, target)?;
+    let (leaf, next_key) = descend_to_leaf(reader, chunk_map, nodesize, root_logical, target)?;
 
-    if leaf.header.nritems == 0 {
+    if let Some(idx) = binary_search_leaf(&leaf, target)? {
+        return Ok(Some((leaf, idx)));
+    }
+    let Some(next_key) = next_key else {
         return Ok(None);
+    };
+    // Every key in the next subtree is >= its separator, which is > target,
+    // so the answer is that leaf's first item.
+    let (next, _) = descend_to_leaf(reader, chunk_map, nodesize, root_logical, &next_key)?;
+    if next.header.nritems == 0 || next.leaf_item(0)?.key <= *target {
+        return Err(Error::CorruptBtree {
+            token: "separator_mismatch",
+            logical: next.header.bytenr,
+        });
     }
-
-    match binary_search_leaf(&leaf, target)? {
-        Some(idx) => Ok(Some((leaf, idx))),
-        None => Ok(None),
-    }
+    Ok(Some((next, 0)))
 }
 
-/// Descend from a tree root to the leaf that should contain `target`.
+/// Descend from a tree root to the leaf that should contain `target`. Also
+/// returns the nearest separator key to the right of the path taken, the
+/// first key of the following leaf, or `None` on the tree's rightmost path.
 fn descend_to_leaf<R: BlockRead>(
     reader: &mut R,
     chunk_map: &ChunkMap,
     nodesize: u32,
     root_logical: u64,
     target: &DiskKey,
-) -> Result<TreeBlock> {
+) -> Result<(TreeBlock, Option<DiskKey>)> {
     let mut current = read_tree_block(reader, chunk_map, nodesize, root_logical)?;
+    let mut next_key = None;
     let mut depth: u8 = 0;
     while current.header.level > 0 {
         depth = depth.saturating_add(1);
@@ -266,10 +281,13 @@ fn descend_to_leaf<R: BlockRead>(
             });
         }
         let child_idx = binary_search_interior(&current, target)?;
+        if child_idx + 1 < current.header.nritems {
+            next_key = Some(current.key_ptr(child_idx + 1)?.key);
+        }
         let kp = current.key_ptr(child_idx)?;
         current = read_tree_block(reader, chunk_map, nodesize, kp.blockptr)?;
     }
-    Ok(current)
+    Ok((current, next_key))
 }
 
 /// Binary search the interior node for the rightmost keyptr whose key is
@@ -517,6 +535,132 @@ mod tests {
             .expect("should match keys[1]");
         let item = result.0.leaf_item(result.1).unwrap();
         assert_eq!(item.key, keys[1]);
+    }
+
+    fn key(objectid: u64) -> DiskKey {
+        DiskKey {
+            objectid,
+            item_type: 1,
+            offset: 0,
+        }
+    }
+
+    /// An interior node at `level` pointing at `ptrs` (separator, child).
+    fn build_node(nodesize: u32, bytenr: u64, level: u8, ptrs: &[(DiskKey, u64)]) -> Vec<u8> {
+        let mut block = vec![0u8; nodesize as usize];
+        block[48..56].copy_from_slice(&bytenr.to_le_bytes());
+        block[80..88].copy_from_slice(&1u64.to_le_bytes());
+        block[88..96].copy_from_slice(&1u64.to_le_bytes());
+        block[96..100].copy_from_slice(&(ptrs.len() as u32).to_le_bytes());
+        block[100] = level;
+        for (i, (k, child)) in ptrs.iter().enumerate() {
+            let at = Header::SIZE + i * KeyPtr::SIZE;
+            block[at..at + 8].copy_from_slice(&k.objectid.to_le_bytes());
+            block[at + 8] = k.item_type;
+            block[at + 9..at + 17].copy_from_slice(&k.offset.to_le_bytes());
+            block[at + 17..at + 25].copy_from_slice(&child.to_le_bytes());
+            block[at + 25..at + 33].copy_from_slice(&1u64.to_le_bytes());
+        }
+        let body_csum = crc32c(&block[CSUM_LEN..]);
+        block[0..4].copy_from_slice(&body_csum.to_le_bytes());
+        block
+    }
+
+    /// Lay `blocks` out back to back from `base` in one identity-mapped chunk.
+    fn synth_tree(base: u64, blocks: &[Vec<u8>]) -> (ChunkMap, Vec<u8>) {
+        let joined = blocks.concat();
+        synth_volume(joined.len() as u32, &joined, base)
+    }
+
+    /// Root at `base`, leaves A [1, 2] and B [5, 6] behind it.
+    fn two_leaf_tree(nodesize: u32, base: u64) -> (ChunkMap, Vec<u8>) {
+        let n = u64::from(nodesize);
+        let root = build_node(
+            nodesize,
+            base,
+            1,
+            &[(key(1), base + n), (key(5), base + 2 * n)],
+        );
+        let a = build_leaf(nodesize, base + n, &[(key(1), b"1"), (key(2), b"2")]);
+        let b = build_leaf(nodesize, base + 2 * n, &[(key(5), b"5"), (key(6), b"6")]);
+        synth_tree(base, &[root, a, b])
+    }
+
+    #[test]
+    fn find_first_ge_moves_to_the_next_leaf() {
+        let nodesize = 4096u32;
+        let base = 0x10_0000u64;
+        let (map, device) = two_leaf_tree(nodesize, base);
+        let mut reader: &[u8] = &device;
+
+        // 3 sorts after everything in leaf A, so the answer opens leaf B.
+        let (leaf, idx) = find_first_ge(&mut reader, &map, nodesize, base, &key(3))
+            .unwrap()
+            .expect("key 5 follows");
+        assert_eq!(leaf.leaf_item(idx).unwrap().key, key(5));
+
+        let (leaf, idx) = find_first_ge(&mut reader, &map, nodesize, base, &key(2))
+            .unwrap()
+            .unwrap();
+        assert_eq!(leaf.leaf_item(idx).unwrap().key, key(2));
+
+        assert!(find_first_ge(&mut reader, &map, nodesize, base, &key(7))
+            .unwrap()
+            .is_none());
+        assert!(find_exact(&mut reader, &map, nodesize, base, &key(3))
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn find_first_ge_takes_the_separator_from_a_higher_level() {
+        // root [1 -> X, 10 -> Y]; X [1 -> A, 5 -> B]; Y [10 -> C]. Leaf B is
+        // the last child of X, so the following leaf comes from the root.
+        let nodesize = 4096u32;
+        let base = 0x10_0000u64;
+        let at = |slot: u64| base + slot * u64::from(nodesize);
+        let blocks = [
+            build_node(nodesize, base, 2, &[(key(1), at(1)), (key(10), at(2))]),
+            build_node(nodesize, at(1), 1, &[(key(1), at(3)), (key(5), at(4))]),
+            build_node(nodesize, at(2), 1, &[(key(10), at(5))]),
+            build_leaf(nodesize, at(3), &[(key(1), b"1")]),
+            build_leaf(nodesize, at(4), &[(key(5), b"5"), (key(6), b"6")]),
+            build_leaf(nodesize, at(5), &[(key(10), b"10")]),
+        ];
+        let (map, device) = synth_tree(base, &blocks);
+        let mut reader: &[u8] = &device;
+
+        let (leaf, idx) = find_first_ge(&mut reader, &map, nodesize, base, &key(7))
+            .unwrap()
+            .expect("key 10 follows");
+        assert_eq!(leaf.leaf_item(idx).unwrap().key, key(10));
+    }
+
+    #[test]
+    fn find_first_ge_refuses_a_separator_that_lies() {
+        // The root says leaf B starts at 5, but B holds 2: following it would
+        // hand back a key below the target.
+        let nodesize = 4096u32;
+        let base = 0x10_0000u64;
+        let n = u64::from(nodesize);
+        let root = build_node(
+            nodesize,
+            base,
+            1,
+            &[(key(1), base + n), (key(5), base + 2 * n)],
+        );
+        let a = build_leaf(nodesize, base + n, &[(key(1), b"1")]);
+        let b = build_leaf(nodesize, base + 2 * n, &[(key(2), b"2")]);
+        let (map, device) = synth_tree(base, &[root, a, b]);
+        let mut reader: &[u8] = &device;
+
+        assert!(matches!(
+            find_first_ge(&mut reader, &map, nodesize, base, &key(3)),
+            Err(Error::CorruptBtree {
+                token: "separator_mismatch",
+                ..
+            })
+        ));
     }
 
     #[test]
