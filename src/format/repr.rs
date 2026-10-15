@@ -36,7 +36,7 @@
 
 use crate::{
     format::constants::{CSUM_LEN, FSID_LEN, UUID_LEN},
-    util::{read_le_u16, read_le_u32, read_le_u64, read_le_u8},
+    le::{read_le_u16, read_le_u32, read_le_u64, read_le_u8},
 };
 
 // ---------------------------------------------------------------------------

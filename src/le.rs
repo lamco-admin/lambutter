@@ -6,8 +6,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! Small primitives used across the crate. Kept tight on purpose; if a
-//! helper grows beyond a few lines it belongs in its domain module.
+//! Little-endian field reads. btrfs stores every on-disk integer
+//! little-endian; these read one at a fixed offset of a parsed block.
 
 #[inline]
 pub(crate) fn read_le_u16(buf: &[u8], offset: usize) -> u16 {

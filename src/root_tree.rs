@@ -34,7 +34,7 @@ use crate::{
         repr::{DirEntry, DiskKey, RootItem},
     },
     inode::Inode,
-    util::{read_le_u16, read_le_u64},
+    le::{read_le_u16, read_le_u64},
 };
 
 /// Compute the btrfs name-hash for a directory entry. Uses CRC32C with the

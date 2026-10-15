@@ -43,11 +43,11 @@ mod error;
 mod file;
 mod format;
 mod inode;
+mod le;
 mod path;
 mod resolve;
 mod root_tree;
 mod superblock;
-mod util;
 
 pub use block_read::{BlockRead, SliceReadError};
 use chunk_tree::ChunkMap;
