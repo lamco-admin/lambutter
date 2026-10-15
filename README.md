@@ -20,21 +20,24 @@ bare-metal kernels, and recovery tooling.
 
 ## Status
 
-**v0.3.0 — feature-complete + live-validated** (see
-[`docs/SPEC-LAMBUTTER.md` §2](https://github.com/lamco-admin/lambutter/blob/main/docs/SPEC-LAMBUTTER.md) for scope, and
-[`CHANGELOG.md`](https://github.com/lamco-admin/lambutter/blob/main/CHANGELOG.md) for the version arc through v0.1.0 →
-v0.3.0). Open and read regular files, symlinks, and directory listings
-on SINGLE / DUP / RAID1 / RAID1C3 / RAID1C4 btrfs volumes; decode zstd,
-zlib, and LZO extents; surface unsupported profiles (RAID0/10/5/6,
-ZONED, RAID_STRIPE_TREE) as typed errors. The public API may add but
-not break within the v0.3.x line. Data-block CSUM verification and
-snapshot enumeration are tracked for v0.4.0+.
+**0.4.0.** Open and read regular files, symlinks and directory listings
+on SINGLE / DUP / RAID1 / RAID1C3 / RAID1C4 btrfs volumes, at the default
+subvolume or one chosen by id or path, crossing into nested subvolumes the
+way a Linux mount does. Decodes zstd, zlib and LZO extents, and refuses
+RAID0/10/5/6, ZONED, RAID_STRIPE_TREE, REMAP_TREE and any unknown
+incompat feature with a typed error. See
+[`docs/SPEC-LAMBUTTER.md` §2](https://github.com/lamco-admin/lambutter/blob/main/docs/SPEC-LAMBUTTER.md)
+for scope and [`CHANGELOG.md`](https://github.com/lamco-admin/lambutter/blob/main/CHANGELOG.md)
+for what changed. Data-block CSUM verification and snapshot enumeration
+are not implemented.
 
 **Validation posture:**
-- 36 host unit tests, all modules
-- 9 fixture-based oracle tests (uncompressed, zstd, zlib, LZO,
-  DUP-metadata, NO_HOLES sparse, symlinks, read-at chunked, smoke)
-- 5 cargo-fuzz harnesses, 1-hour smoke run completed with zero crashes
+- 53 host unit tests across all modules
+- 12 fixture-based oracle tests on images written by the Linux kernel
+  (uncompressed, zstd, zlib, LZO, DUP metadata, NO_HOLES sparse,
+  symlinks, extents and directories spanning B-tree leaves, varied LZO
+  segments, subvolumes and snapshots, chunked reads, smoke)
+- 5 cargo-fuzz harnesses
 - Live host validation: `examples/inspect.rs` against live openSUSE
   Tumbleweed btrfs partition with Snapper-managed default-subvol
   redirect — 6 path reads (regular file 38 MB full-extent walk +
@@ -55,7 +58,7 @@ or in `Cargo.toml`, with every codec a `/boot` might use:
 
 ```toml
 [dependencies]
-lambutter = { version = "0.3", features = ["zstd", "zlib", "lzo"] }
+lambutter = { version = "0.4", features = ["zstd", "zlib", "lzo"] }
 ```
 
 ## Use

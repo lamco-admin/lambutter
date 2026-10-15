@@ -1,17 +1,77 @@
 # Changelog
 
-All notable changes to lambutter are documented here. Format inspired by
-Keep a Changelog; semantic versioning is loose during pre-1.0 (additions
-are permitted within a minor version line; breaking changes bump minor
-since pre-1.0).
+All notable changes to lambutter are documented here. The format is
+inspired by Keep a Changelog. Before 1.0, a patch release carries bug and
+doc fixes only, and new API, new error tokens and breaking changes bump
+the minor version, as the version-progression policy at the end of this
+file sets out.
 
-**A note on version numbering:** lambutter has not been published to
-crates.io. The version arc below narrates the development phases as
-distinct conceptual releases — each represents a maturity milestone with
-its own scope. Tags exist in git for `v0.1.0`, `v0.1.1`, and `v0.3.0`;
-intermediate version numbers (`v0.1.2` through `v0.2.0`) document phases
-of work that did not get separate publishable releases but are useful as
-narrative milestones for anyone reading this file later.
+**A note on version numbering:** lambutter is on crates.io from 0.3.0.
+The entries before 0.3.0 narrate development phases as distinct
+conceptual releases, each a maturity milestone with its own scope. Tags
+exist in git for `v0.1.0`, `v0.1.1`, `v0.3.0` and later releases;
+`v0.1.2` through `v0.2.0` document phases of work that did not get
+separate publishable releases.
+
+## [0.4.0] - 2026-10-14
+
+### Fixed
+
+- A search that ran past the last item of a B-tree leaf stopped there
+  instead of continuing into the next leaf. A file whose extent items
+  continue in the next leaf read as zeros from that point, a directory
+  whose index had a gap at a leaf boundary lost entries, and the
+  chunk-tree walk stopped at its first leaf. Measured on images written by
+  Linux: A 12 MB LZO kernel read zeros from byte 3670016, a 190 MB zstd
+  file read wrong, and a 200-entry `loader/entries` listed 72 entries.
+- LZO extents: The decoder treated any zero byte at an unaligned offset as
+  padding, but btrfs pads only when fewer than four bytes are left in a
+  sector, so a segment whose length starts with a zero byte was misparsed.
+  Four of six ordinary binaries written with `compress-force=lzo` failed
+  with `BadCompression`. Segment size and padding also assumed 4 KiB
+  sectors; the filesystem's sector size is used now.
+- An entry naming a subvolume was read as an inode in the parent's tree,
+  so a `/boot` subvolume resolved to the parent's root directory and
+  `/boot/etc/hello` returned `/etc/hello`. Paths and listings now cross
+  into the subvolume when the root tree links it there, as a Linux mount
+  shows it, and a snapshot's copy of a nested subvolume's entry reads as
+  an empty directory, as in Linux.
+- Unknown incompat bits were accepted silently. They are refused with
+  `feat_unknown_incompat`, and remap-tree (bit 17, Linux 7.0,
+  experimental) with `feat_remap_tree`.
+- xxhash, sha256 and blake2 filesystems reported `BadSuperblock(BadCsum)`
+  because the CRC32C check ran before the checksum type was read. They
+  report `UnsupportedChecksum` now, and a copy with an unreadable type no
+  longer stops a valid copy elsewhere from being used.
+
+### Changed (breaking)
+
+- `Inode` carries the subvolume that holds it. Its fields are private;
+  use `objectid()` and `subvolume()`.
+- `DirEntry` gains `inode`, the entry's own handle with any subvolume
+  crossing applied, and is `#[non_exhaustive]`.
+- `Error` gains `NotASubvolume`.
+- MSRV is Rust 1.87, which `ruzstd` 0.9 requires.
+- `ruzstd` moves to 0.9.1, which fixes RUSTSEC-2026-0344, and
+  `miniz_oxide` to 0.9.1, which drops the unmaintained `adler`.
+
+### Added
+
+- `Btrfs::open_subvol_id` and `Btrfs::open_subvol_path` open a chosen
+  subvolume, as the kernel's `subvolid=` and `subvol=` mount it.
+- `Btrfs::subvolume()`, the id of the subvolume an instance was opened
+  at. `default_subvol_objectid()` remains as a deprecated alias.
+- Error tokens `feat_unknown_incompat`, `feat_remap_tree`,
+  `csum_unknown`, `separator_mismatch`, `dir_entry_location` and
+  `root_ref_short`.
+- Fixtures F10 (extents and a directory spanning leaves), F11 (varied
+  LZO segments) and F12 (subvolumes, a nested subvolume, a snapshot and a
+  non-top default), all written by the Linux kernel.
+- CI also runs weekly, so new toolchain lints and advisories surface
+  without a push.
+- The package description names Lamco Development LLC, the README gains
+  website, documentation and install links, and `LICENSE-APACHE` carries
+  the full license text.
 
 ## [0.3.1] — Debian-archive dependency alignment
 
