@@ -169,6 +169,7 @@ impl<R: BlockRead> Btrfs<R> {
         let sb = superblock::load(&mut reader, device_size_bytes)?;
 
         let mut chunk_map = ChunkMap::default();
+        chunk_map.set_local_devid(sb.devid);
         chunk_map
             .parse_system_chunk_array(&sb.sys_chunk_array, sb.sys_chunk_array_size as usize)?;
 

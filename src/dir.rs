@@ -17,7 +17,7 @@ use crate::{
     btree::find_first_ge,
     error::{Error, Result},
     format::{
-        constants::DIR_INDEX_KEY,
+        constants::{DIR_INDEX_KEY, FT_ENCRYPTED},
         repr::{DirEntry as DiskDirEntry, DiskKey},
     },
     inode::Inode,
@@ -82,6 +82,11 @@ pub(crate) fn read_dir<R: BlockRead>(
                 token: "dir_index_short",
                 logical: leaf.header.bytenr,
             })?;
+            // An encrypted name is ciphertext; listing it would hand the
+            // caller garbage as a file name.
+            if entry.ty & FT_ENCRYPTED != 0 {
+                return Err(Error::UnsupportedFeature("feat_encryption"));
+            }
             let inode = entry_target(
                 reader,
                 trees,

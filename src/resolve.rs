@@ -16,7 +16,9 @@ use crate::{
     chunk_tree::ChunkMap,
     error::{Error, Result},
     format::{
-        constants::{DIR_ITEM_KEY, EMPTY_SUBVOL_DIR_OBJECTID, INODE_ITEM_KEY, ROOT_ITEM_KEY},
+        constants::{
+            DIR_ITEM_KEY, EMPTY_SUBVOL_DIR_OBJECTID, FT_ENCRYPTED, INODE_ITEM_KEY, ROOT_ITEM_KEY,
+        },
         repr::{DirEntry, DiskKey},
     },
     inode::Inode,
@@ -83,6 +85,9 @@ fn lookup_in_dir<R: BlockRead>(
                 logical: leaf.header.bytenr,
             });
         };
+        if entry.ty & FT_ENCRYPTED != 0 {
+            return Err(Error::UnsupportedFeature("feat_encryption"));
+        }
         if entry.name == name {
             return entry_target(reader, trees, dir, name, entry.location, leaf.header.bytenr);
         }

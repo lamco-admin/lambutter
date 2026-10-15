@@ -1,0 +1,7 @@
+{
+  "fixture": "f13_raid1_two_devices",
+  "files": {
+    "/vmlinuz": "17575ddb1adf67fc900d7a1e0db67b249fb61ce456b3a85291160f71ab594b15",
+    "/entry.conf": "d75204050c81c92c98740361ab11c55a5b53b6338a8f0dc8b81d2fd26fb94335"
+  }
+}

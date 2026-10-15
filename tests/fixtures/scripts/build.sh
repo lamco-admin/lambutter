@@ -4,7 +4,8 @@
 # committed to the repo as zstd-compressed images plus a JSON file listing
 # the canonical (path, sha256) tuples the test harness asserts against.
 #
-# Requires: btrfs-progs, sudo (for loop mount), zstd, sha256sum.
+# Requires: btrfs-progs (including btrfs-map-logical), sudo (for loop mounts
+# and loop devices), zstd, sha256sum, python3.
 # This script SHOULD be re-runnable. It produces deterministic output via:
 #   - fixed file contents
 #   - btrfs-progs `--nodesize` and `--sectorsize` pinned values
@@ -15,6 +16,7 @@
 # Recompress only:     ./build.sh recompress
 
 set -euo pipefail
+export PATH="/usr/sbin:/sbin:$PATH"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DATA="$HERE/../data"
@@ -427,6 +429,193 @@ build_f12_subvolumes() {
 EOF
 }
 
+# Loop devices this run attached, detached on exit.
+LOOPS=()
+detach_loops() {
+    local l
+    for l in "${LOOPS[@]}"; do sudo losetup -d "$l" 2>/dev/null || true; done
+    LOOPS=()
+}
+trap 'sudo umount "$WORK/mnt" 2>/dev/null || true; detach_loops; rm -rf "$WORK"' EXIT
+
+# attach_loop IMG VAR: attach IMG and store its loop device in VAR. Not a
+# command substitution, which would run in a subshell and lose LOOPS.
+attach_loop() {
+    local dev
+    dev="$(sudo losetup --find --show "$1")"
+    LOOPS+=("$dev")
+    printf -v "$2" '%s' "$dev"
+}
+
+# chunk_devids IMG: one line per chunk, "TYPE devid:offset ...", from the
+# chunk tree, to check where the fixture's chunks landed.
+chunk_devids() {
+    btrfs inspect-internal dump-tree -t chunk "$1" 2>/dev/null | awk '
+        /CHUNK_ITEM/ { if (line != "") print line; line = "" }
+        /type DATA|type METADATA|type SYSTEM/ { line = $0; sub(/.*type /, "", line); sub(/ .*/, "", line) }
+        /stripe [0-9]+ devid/ { line = line " " $4 ":" $6 }
+        END { if (line != "") print line }'
+}
+
+build_f13_raid1_two_devices() {
+    echo "=== F13 RAID1 across two devices ==="
+    # Made on one device, then given a second and balanced to RAID1, so each
+    # chunk's two copies sit at different offsets on the two devices: Reading
+    # a device at the other device's offset gives the wrong bytes.
+    local content="$WORK/f13-content"
+    mkdir -p "$content"
+    seq 1 30000 | awk '{ printf "raid1 kernel line %06d\n", $1 }' > "$content/vmlinuz"
+    printf 'title RAID1\nlinux /vmlinuz\n' > "$content/entry.conf"
+    local img0="$WORK/f13.dev1.img" img1="$WORK/f13.dev2.img" m="$WORK/mnt" l0 l1
+    truncate -s 256M "$img0" "$img1"
+    mkfs.btrfs -q -f --nodesize 16384 --sectorsize 4096 -d single -m single "$img0"
+    attach_loop "$img0" l0
+    attach_loop "$img1" l1
+    mkdir -p "$m"
+    sudo mount "$l0" "$m"
+    sudo cp "$content/vmlinuz" "$content/entry.conf" "$m/"
+    sudo sync
+    sudo btrfs -q device add -f "$l1" "$m"
+    sudo btrfs -q balance start -f -dconvert=raid1 -mconvert=raid1 -sconvert=raid1 "$m" >/dev/null
+    sudo sync
+    sudo umount "$m"
+    detach_loops
+    chunk_devids "$img0"
+    # Every chunk must be RAID1 with copies at different offsets.
+    chunk_devids "$img0" | awk '{ if ($1 !~ /RAID1/) bad = 1; split($2, a, ":"); split($3, b, ":"); if (a[2] == b[2]) same = 1 }
+        END { exit (bad || same) }' || { echo "f13: chunks not RAID1 at distinct offsets" >&2; exit 1; }
+    sha() { sha256sum < "$1" | awk '{print $1}'; }
+    compress_fixture "$img0" "$DATA/f13_raid1_two_devices.dev1.img.zst"
+    compress_fixture "$img1" "$DATA/f13_raid1_two_devices.dev2.img.zst"
+    emit_expected_json f13_raid1_two_devices \
+        "/vmlinuz" "$(sha "$content/vmlinuz")" \
+        "/entry.conf" "$(sha "$content/entry.conf")"
+}
+
+build_f14_single_two_devices() {
+    echo "=== F14 single data across two devices ==="
+    # RAID1 metadata, single data: Each data chunk lives on one device, so a
+    # file on the other device can't be read from this one.
+    local content="$WORK/f14-content" i
+    mkdir -p "$content"
+    for i in 1 2 3 4 5 6; do
+        seq 1 1200000 | awk -v f="$i" '{ printf "file %d line %08d\n", f, $1 }' > "$content/big$i.bin"
+    done
+    local img0="$WORK/f14.dev1.img" img1="$WORK/f14.dev2.img" m="$WORK/mnt" l0 l1
+    truncate -s 256M "$img0" "$img1"
+    mkfs.btrfs -q -f --nodesize 16384 --sectorsize 4096 -d single -m raid1 "$img0" "$img1"
+    attach_loop "$img0" l0
+    attach_loop "$img1" l1
+    sudo btrfs device scan "$l0" "$l1" >/dev/null
+    mkdir -p "$m"
+    sudo mount "$l0" "$m"
+    for i in 1 2 3 4 5 6; do sudo cp "$content/big$i.bin" "$m/"; sudo sync; done
+    sudo umount "$m"
+    detach_loops
+    chunk_devids "$img0"
+    chunk_devids "$img0" | awk '$1 == "DATA" || $1 == "DATA|single" { split($2, a, ":"); seen[a[1]] = 1 }
+        END { exit !(seen[1] && seen[2]) }' || { echo "f14: data chunks not on both devices" >&2; exit 1; }
+    sha() { sha256sum < "$1" | awk '{print $1}'; }
+    compress_fixture "$img0" "$DATA/f14_single_two_devices.dev1.img.zst"
+    compress_fixture "$img1" "$DATA/f14_single_two_devices.dev2.img.zst"
+    local args=()
+    for i in 1 2 3 4 5 6; do args+=("/big$i.bin" "$(sha "$content/big$i.bin")"); done
+    emit_expected_json f14_single_two_devices "${args[@]}"
+}
+
+build_f15_fscrypt_markers() {
+    echo "=== F15 fscrypt markers ==="
+    # btrfs fscrypt isn't in mainline Linux, so no tool writes it. The image is
+    # an ordinary one with the on-disk markers set by hand: secret-extent.bin's
+    # extent has its encryption byte set to 1, and secret-name.txt's directory
+    # entries (DIR_ITEM and DIR_INDEX) carry the BTRFS_FT_ENCRYPTED type flag
+    # 0x80. The leaves' CRC32C checksums are recomputed. plain.txt is
+    # untouched.
+    local content="$WORK/f15-content"
+    mkdir -p "$content"
+    seq 1 2000 | awk '{ printf "extent marked encrypted %06d\n", $1 }' > "$content/secret-extent.bin"
+    printf 'name marked encrypted\n' > "$content/secret-name.txt"
+    printf 'plain file\n' > "$content/plain.txt"
+    find "$content" -exec touch -d "@0" {} +
+    local img="$WORK/f15.img"
+    truncate -s 128M "$img"
+    mkfs.btrfs -q -f --rootdir "$content" --nodesize 16384 --sectorsize 4096 -m single "$img"
+    btrfs inspect-internal dump-tree -t fs "$img" > "$WORK/f15.fs.txt"
+    python3 - "$img" "$WORK/f15.fs.txt" <<'PY'
+import re, struct, subprocess, sys
+img_path, dump = sys.argv[1], open(sys.argv[2]).read()
+NODESIZE = 16384
+
+def crc32c(data):
+    crc = 0xffffffff
+    for b in data:
+        crc ^= b
+        for _ in range(8):
+            crc = (crc >> 1) ^ 0x82f63b78 if crc & 1 else crc >> 1
+    return crc ^ 0xffffffff
+
+def physical(logical):
+    out = subprocess.run(['btrfs-map-logical', '-l', str(logical), img_path],
+                         capture_output=True, text=True, check=True).stdout
+    return [int(m) for m in re.findall(r'physical (\d+)', out)]
+
+# Leaves with their items: (leaf logical, [(key text, itemoff, itemsize, body)])
+leaves, cur = [], None
+for line in dump.splitlines():
+    m = re.match(r'\s*leaf (\d+) items', line)
+    if m:
+        cur = (int(m.group(1)), [])
+        leaves.append(cur)
+        continue
+    m = re.match(r'\s*item \d+ key \((.*?)\) itemoff (\d+) itemsize (\d+)', line)
+    if m and cur:
+        cur[1].append([m.group(1), int(m.group(2)), int(m.group(3)), ''])
+    elif cur and cur[1]:
+        cur[1][-1][3] += line + '\n'
+
+inode_of = {}
+for _, items in leaves:
+    for key, off, size, body in items:
+        m = re.search(r'location key \((\d+) INODE_ITEM 0\).*?\n.*?name: (\S+)', body, re.S)
+        if 'DIR_INDEX' in key and m:
+            inode_of[m.group(2)] = int(m.group(1))
+
+img = open(img_path, 'r+b')
+patched = set()
+def patch(leaf_logical, at, fn):
+    for phys in physical(leaf_logical):
+        img.seek(phys)
+        leaf = bytearray(img.read(NODESIZE))
+        fn(leaf, at)
+        leaf[0:32] = struct.pack('<I', crc32c(leaf[32:])) + bytes(28)
+        img.seek(phys)
+        img.write(leaf)
+    patched.add(leaf_logical)
+
+def set_encryption(leaf, at):
+    leaf[at + 17] = 1                      # file_extent_item.encryption
+
+def set_ft_encrypted(leaf, at):
+    leaf[at + 29] |= 0x80                  # dir_item.type
+
+secret_extent, secret_name = inode_of['secret-extent.bin'], inode_of['secret-name.txt']
+done = {'extent': 0, 'dir': 0}
+for leaf_logical, items in leaves:
+    for key, off, size, body in items:
+        at = 101 + off                     # leaf header, then item data
+        if key.startswith(f'{secret_extent} EXTENT_DATA '):
+            patch(leaf_logical, at, set_encryption); done['extent'] += 1
+        if ('DIR_ITEM' in key or 'DIR_INDEX' in key) and 'name: secret-name.txt' in body:
+            patch(leaf_logical, at, set_ft_encrypted); done['dir'] += 1
+assert done == {'extent': 1, 'dir': 2}, done
+PY
+    btrfs check --readonly "$img" >/dev/null 2>&1 || true
+    sha() { sha256sum < "$1" | awk '{print $1}'; }
+    compress_fixture "$img" "$DATA/f15_fscrypt_markers.img.zst"
+    emit_expected_json f15_fscrypt_markers \
+        "/plain.txt" "$(sha "$content/plain.txt")"
+}
+
 # --------------------------------------------------------------------------
 # Driver
 # --------------------------------------------------------------------------
@@ -444,6 +633,9 @@ case "${1:-all}" in
     f10) build_f10_multi_leaf ;;
     f11) build_f11_lzo_segments ;;
     f12) build_f12_subvolumes ;;
+    f13) build_f13_raid1_two_devices ;;
+    f14) build_f14_single_two_devices ;;
+    f15) build_f15_fscrypt_markers ;;
     all)
         build_f1_single_uncompressed
         build_f2_single_zstd
@@ -455,8 +647,11 @@ case "${1:-all}" in
         build_f10_multi_leaf
         build_f11_lzo_segments
         build_f12_subvolumes
+        build_f13_raid1_two_devices
+        build_f14_single_two_devices
+        build_f15_fscrypt_markers
         ;;
-    *) echo "Usage: $0 [all|f1|f2|f3|f4|f5|f8|f9|f10|f11|f12]" >&2; exit 2 ;;
+    *) echo "Usage: $0 [all|f1|f2|f3|f4|f5|f8|f9|f10|f11|f12|f13|f14|f15]" >&2; exit 2 ;;
 esac
 
 echo "Done. Fixtures in $DATA/"

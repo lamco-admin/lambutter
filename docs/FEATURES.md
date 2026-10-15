@@ -35,14 +35,15 @@ choice. Update at every minor version bump.
 | Two-phase bootstrap (sys_chunk_array first, then full chunk-tree walk) | ✓ | `src/chunk_tree.rs::populate_from_chunk_tree` |
 | `SINGLE` profile | ✓ | `pick_stripe` |
 | `DUP` profile | ✓ | mkfs.btrfs default for SSDs |
-| `RAID1` profile | ✓ | Falls through to first-local-stripe |
+| `RAID1` profile | ✓ | The copy on the device being read (0.5.0) |
 | `RAID1C3` profile | ✓ | 3-copy mirror |
 | `RAID1C4` profile | ✓ | 4-copy mirror |
 | `RAID0` profile | ✓ (rejected) | `UnsupportedProfile("raid0")` |
 | `RAID10` profile | ✓ (rejected) | `UnsupportedProfile("raid10")` |
 | `RAID5` profile | ✓ (rejected) | `UnsupportedProfile("raid5")` |
 | `RAID6` profile | ✓ (rejected) | `UnsupportedProfile("raid6")` |
-| Multi-device with missing local device | ✗ (not checked) | Stripe `devid` is recorded but not compared, so a RAID1 member read through the wrong device relies on the metadata checksum to catch it. Planned |
+| Multi-device filesystems | ✓ (0.5.0) | Each chunk is read from the stripe whose `devid` matches the superblock's `dev_item.devid`; a chunk with no copy on this device is `UnsupportedProfile("prof_other_device")` |
+| fscrypt markers | ✓ (rejected, 0.5.0) | An extent with a non-zero `encryption` byte or a directory entry with `BTRFS_FT_ENCRYPTED` is `UnsupportedFeature("feat_encryption")` |
 
 ### 1.3 B-tree walker (generic across chunk / root / fs / extent / log / csum / free-space / uuid / quota)
 
@@ -157,7 +158,7 @@ log-grep consumers. The full vocabulary:
 | `BadSuperblock(UnsupportedIncompat)` | — | INCOMPAT flag we don't implement |
 | `BadSuperblock(BadGeometry)` | — | sectorsize / nodesize outside supported range |
 | `UnsupportedFeature(token)` | feature name (e.g. `"feat_zoned"`, `"feat_unknown_incompat"`) | Out of scope |
-| `UnsupportedProfile(token)` | `raid0`, `raid10`, `raid5`, `raid6` | By design |
+| `UnsupportedProfile(token)` | `raid0`, `raid10`, `raid5`, `raid6`, `prof_other_device` | By design |
 | `UnsupportedChecksum(token)` | csum-type name | By design |
 | `CsumMismatch { logical }` | — | Disk corruption at that bytenr |
 | `CorruptBtree { token, logical }` | `key_order`, `separator_mismatch`, `dir_entry_location`, `root_ref_short`, `item_region_overflow`, `child_count`, `depth_limit` | Disk corruption or malicious input |
@@ -183,9 +184,8 @@ These are *not* bugs and will not be implemented in the 0.4.x line:
 | UUID-tree access | Not needed for read path |
 | Quota-tree access | Not needed for read path |
 | Data-block CSUM_TREE verification | v0.2.0+ scope — metadata-block CSUMs ARE verified |
-| Multi-device read with stripe-failover (RAID1 with primary device missing) | Complex stripe-selection logic; v0.2.0+ candidate if a real consumer needs it |
 | Hardware-accelerated CRC32C (SSE 4.2 / ARMv8 CRC) | Software-only by default; can be added behind a feature flag |
-| Encrypted btrfs (`fscrypt` per-file encryption) | Not part of the v0.3.x scope; btrfs encryption is itself a non-default and not yet widespread |
+| Reading encrypted btrfs (`fscrypt` per-file encryption) | Not in mainline Linux; its markers are refused (0.5.0) |
 | LZ4 / xz / brotli extent decoding | Not in btrfs format spec — only zstd/zlib/LZO are valid |
 | Generic `BlockWrite` trait | Crate is read-only |
 | File modification time / extended attributes (xattr) | Out of scope for v0.3.x — kernel-load consumers don't need them |

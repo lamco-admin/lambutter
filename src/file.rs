@@ -27,6 +27,20 @@ use crate::{
     inode::Metadata,
 };
 
+/// Parse an EXTENT_DATA item's header. An extent encrypted with fscrypt
+/// (btrfs fscrypt isn't merged in mainline Linux, but the on-disk field
+/// exists) holds ciphertext, so it's refused rather than read.
+fn extent_header(data: &[u8], logical: u64) -> Result<ExtentDataHeader> {
+    let header = ExtentDataHeader::parse(data, 0).ok_or(Error::CorruptBtree {
+        token: "extent_header_short",
+        logical,
+    })?;
+    if header.encryption != 0 {
+        return Err(Error::UnsupportedFeature("feat_encryption"));
+    }
+    Ok(header)
+}
+
 /// The two block sizes a file read needs from the superblock: `nodesize` to
 /// walk the tree, `sectorsize` to decode LZO extents.
 #[derive(Debug, Clone, Copy)]
@@ -118,10 +132,7 @@ pub(crate) fn read_link<R: BlockRead>(
         });
     }
     let data = leaf.leaf_item_data(item)?;
-    let header = ExtentDataHeader::parse(data, 0).ok_or(Error::CorruptBtree {
-        token: "extent_header_short",
-        logical: leaf.header.bytenr,
-    })?;
+    let header = extent_header(data, leaf.header.bytenr)?;
     if header.ty != FILE_EXTENT_INLINE {
         // Legal-but-rare: symlink targets longer than fit inline live in
         // regular extents. Reading those would mean wiring read_file's
@@ -378,10 +389,7 @@ pub(crate) fn read_file_at<R: BlockRead>(
 
 /// Logical length of the file region described by one EXTENT_DATA item.
 fn extent_logical_length(data: &[u8]) -> Result<u64> {
-    let header = ExtentDataHeader::parse(data, 0).ok_or(Error::CorruptBtree {
-        token: "extent_header_short",
-        logical: 0,
-    })?;
+    let header = extent_header(data, 0)?;
     match header.ty {
         FILE_EXTENT_INLINE => Ok(header.ram_bytes),
         FILE_EXTENT_REG | FILE_EXTENT_PREALLOC => {
@@ -413,10 +421,7 @@ fn copy_extent_slice<R: BlockRead>(
     in_extent_offset: u64,
     dst: &mut [u8],
 ) -> Result<()> {
-    let header = ExtentDataHeader::parse(data, 0).ok_or(Error::CorruptBtree {
-        token: "extent_header_short",
-        logical: 0,
-    })?;
+    let header = extent_header(data, 0)?;
     match header.ty {
         FILE_EXTENT_INLINE => {
             let payload = &data[ExtentDataHeader::SIZE..];
@@ -535,10 +540,7 @@ fn apply_extent<R: BlockRead>(
     data: &[u8],
     file_size: u64,
 ) -> Result<()> {
-    let header = ExtentDataHeader::parse(data, 0).ok_or(Error::CorruptBtree {
-        token: "extent_header_short",
-        logical: 0,
-    })?;
+    let header = extent_header(data, 0)?;
 
     match header.ty {
         FILE_EXTENT_INLINE => {

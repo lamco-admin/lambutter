@@ -508,6 +508,8 @@ Tokens used in `Error` variants and trust-log integration. Stable across patch r
 | `prof_raid10` | `Error::UnsupportedProfile` | RAID10 profile encountered |
 | `prof_raid5` | `Error::UnsupportedProfile` | RAID5 profile encountered |
 | `prof_raid6` | `Error::UnsupportedProfile` | RAID6 profile encountered |
+| `prof_other_device` | `Error::UnsupportedProfile` | a chunk has no copy on the device being read (a multi-device filesystem), added in 0.5.0 |
+| `feat_encryption` | `Error::UnsupportedFeature` | an extent with a non-zero `encryption` byte or a directory entry with `BTRFS_FT_ENCRYPTED` (fscrypt markers), added in 0.5.0 |
 | `csum_xxhash` | `Error::UnsupportedChecksum` | xxhash csum type |
 | `csum_sha256` | `Error::UnsupportedChecksum` | sha256 csum type |
 | `csum_blake2` | `Error::UnsupportedChecksum` | blake2 csum type |

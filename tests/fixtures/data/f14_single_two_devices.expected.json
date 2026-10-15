@@ -1,0 +1,11 @@
+{
+  "fixture": "f14_single_two_devices",
+  "files": {
+    "/big1.bin": "5fb1f6447d6763482a11651a05f864e9a372a78c1c7566fd3ab3b79d78607a66",
+    "/big2.bin": "2e5c960f1d1a11f943564d48baabef3eb0ba97578080d8a470a800abed172792",
+    "/big3.bin": "b01e8a1bf46336bde5b45b3dad60b5a4a208fdc5dc96a0e9d51353d6bccbaa12",
+    "/big4.bin": "7799a0df8ac9b3be8cc15b2c957888b79e8bf6f2a71ec7ad57530c8e0edab304",
+    "/big5.bin": "b0a998d1b556da67d93b371a8d51d70c5782baf5c0e67ef709dae85f317428c0",
+    "/big6.bin": "2d6862dff39f3dca19b978d859241b6f3c2924d12be2d2e84c93f914ab09d930"
+  }
+}

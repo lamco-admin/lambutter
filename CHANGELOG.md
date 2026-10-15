@@ -13,6 +13,35 @@ exist in git for `v0.1.0`, `v0.1.1`, `v0.3.0` and later releases;
 `v0.1.2` through `v0.2.0` document phases of work that did not get
 separate publishable releases.
 
+## [0.5.0] - unreleased
+
+New error tokens, so a minor release under the policy below.
+
+### Fixed
+
+- **Multi-device filesystems were read from the wrong device.** A chunk's
+  first stripe was used whatever device it named, so on a filesystem across
+  two devices lambutter read the device it was given at the other device's
+  offsets. Metadata checksums caught that for tree blocks; file data came
+  back wrong with no error. Each chunk is now read from its copy on the
+  device being read (the superblock's `dev_item.devid`), and a chunk with no
+  copy there is refused as `UnsupportedProfile("prof_other_device")`. A RAID1
+  filesystem reads from either member.
+- **fscrypt markers were ignored.** btrfs fscrypt isn't in mainline Linux, but
+  its on-disk markers are defined: An extent with a non-zero `encryption` byte
+  holds ciphertext and was returned as file data, and a directory entry with
+  `BTRFS_FT_ENCRYPTED` has an encrypted name. Both are refused as
+  `UnsupportedFeature("feat_encryption")`.
+
+### Added
+
+- Tokens `prof_other_device` and `feat_encryption` (SPEC §11).
+- Fixtures F13 (RAID1 across two devices with copies at different offsets),
+  F14 (single data across two devices) and F15 (fscrypt markers set by hand,
+  since no tool writes them; `build.sh` documents how). All three fail on
+  0.4.0: F13's first device doesn't open, F14 returns a file's wrong bytes,
+  and F15 returns an encrypted extent's bytes.
+
 ## [0.4.0] - 2026-10-14
 
 ### Fixed

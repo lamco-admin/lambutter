@@ -183,6 +183,11 @@ pub(crate) const FILE_EXTENT_INLINE: u8 = 0;
 pub(crate) const FILE_EXTENT_REG: u8 = 1;
 pub(crate) const FILE_EXTENT_PREALLOC: u8 = 2;
 
+/// `BTRFS_FT_ENCRYPTED`: A directory entry's type byte carries this flag when
+/// the name is encrypted with fscrypt. btrfs fscrypt isn't merged in mainline
+/// Linux, but the flag is defined in its on-disk format headers.
+pub(crate) const FT_ENCRYPTED: u8 = 0x80;
+
 // ---------------------------------------------------------------------------
 // Chunk profile / stripe-type bit flags. These are bits within a u64
 // `type` field on `btrfs_chunk` items and on `btrfs_block_group_item`s.

@@ -83,7 +83,7 @@ what evidence we have.
 |---|---|---|
 | `SINGLE` | ✓✓ | Default for `/boot`-on-btrfs single-disk installs |
 | `DUP` | ✓ | `mkfs.btrfs` default for metadata on SSDs |
-| `RAID1` | ⊕ | Two-copy mirror; we pick the first-locally-resolvable stripe |
+| `RAID1` | ⊕ | Two-copy mirror; from 0.5.0 the copy on the device being read |
 | `RAID1C3` | ⊕ | Three-copy mirror |
 | `RAID1C4` | ⊕ | Four-copy mirror |
 | `RAID0` | ✗ (rejected cleanly) | Striped without parity; `Error::UnsupportedProfile("raid0")` |
@@ -204,9 +204,9 @@ For each: what users will see if they try.
 |---|---|---|
 | Writing to the volume | API doesn't exist; can't be attempted | n/a |
 | ZONED btrfs (SMR drives, ZNS) | `Error::UnsupportedFeature("feat_zoned")` on `open()` | Use kernel btrfs driver |
-| Encrypted btrfs (`fscrypt`) | Will read encrypted bytes (returns garbage); not detected | n/a — btrfs fscrypt isn't widely deployed |
+| Encrypted btrfs (`fscrypt`) | From 0.5.0, an encrypted extent or a directory entry with an encrypted name is refused with `Error::UnsupportedFeature("feat_encryption")` | None needed, since btrfs fscrypt isn't in mainline Linux |
 | Data-block CSUM verification | Not performed | Trust upstream; metadata CSUMs ARE verified |
-| Multi-device with primary device missing | Stripe-selection picks first listed device's blocks; if that device isn't available via the supplied `BlockRead`, reads fail with `Io` error | Provide a multi-device-aware `BlockRead` impl that falls back to remaining devices |
+| Multi-device filesystem | From 0.5.0, each chunk is read from its copy on the device being read (the superblock's `dev_item.devid`); a chunk with no copy there is refused with `Error::UnsupportedProfile("prof_other_device")` instead of being read at another device's offsets | Open the device that holds the data; RAID1 chunks read from any member |
 
 ---
 

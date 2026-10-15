@@ -73,7 +73,13 @@ impl ChunkMapping {
     /// Pick a stripe to read from for this chunk. For single-device profiles
     /// this is the only stripe; for mirror profiles (RAID1/RAID1C3/RAID1C4/
     /// DUP) any stripe is equivalent and we pick the first.
-    fn pick_stripe(&self) -> Result<&Stripe> {
+    /// The stripe to read: For DUP and the RAID1 profiles every stripe holds
+    /// the whole chunk, so the first one on `local_devid`, the device being
+    /// read. A chunk with no copy on it lives on another device of a
+    /// multi-device filesystem and is refused rather than read from the
+    /// wrong device. With no local device recorded (the bootstrap fuzz
+    /// entry point), the first stripe.
+    fn pick_stripe(&self, local_devid: Option<u64>) -> Result<&Stripe> {
         match self.profile() {
             0 | BLOCK_GROUP_DUP | BLOCK_GROUP_RAID1 | BLOCK_GROUP_RAID1C3 | BLOCK_GROUP_RAID1C4 => {
             }
@@ -83,9 +89,17 @@ impl ChunkMapping {
             BLOCK_GROUP_RAID6 => return Err(Error::UnsupportedProfile("prof_raid6")),
             _ => return Err(Error::UnsupportedProfile("prof_unknown")),
         }
-        self.stripes
-            .first()
-            .ok_or(Error::UnsupportedProfile("prof_no_stripes"))
+        if self.stripes.is_empty() {
+            return Err(Error::UnsupportedProfile("prof_no_stripes"));
+        }
+        match local_devid {
+            Some(devid) => self
+                .stripes
+                .iter()
+                .find(|s| s.devid == devid)
+                .ok_or(Error::UnsupportedProfile("prof_other_device")),
+            None => Ok(&self.stripes[0]),
+        }
     }
 }
 
@@ -96,9 +110,16 @@ impl ChunkMapping {
 pub(crate) struct ChunkMap {
     /// Sorted by `logical`, non-overlapping. Lookup is binary-search.
     mappings: Vec<ChunkMapping>,
+    /// The device being read (`dev_item.devid` from its superblock).
+    local_devid: Option<u64>,
 }
 
 impl ChunkMap {
+    /// Record the id of the device being read, which chunk stripes name.
+    pub(crate) fn set_local_devid(&mut self, devid: u64) {
+        self.local_devid = Some(devid);
+    }
+
     /// Parse a packed system chunk array (the `sys_chunk_array` field of the
     /// superblock). The array layout is a sequence of `(disk_key, chunk_item,
     /// stripes...)` tuples. The chunk_item's `num_stripes` determines how
@@ -222,7 +243,7 @@ impl ChunkMap {
             });
         }
 
-        let stripe = mapping.pick_stripe()?;
+        let stripe = mapping.pick_stripe(self.local_devid)?;
         let offset_in_chunk = logical - mapping.logical;
         // For SINGLE, DUP, and RAID1/RAID1Cn the stripe covers the whole
         // chunk linearly: physical = stripe.offset + offset_in_chunk.
@@ -412,6 +433,37 @@ mod tests {
         let r = map.resolve(0x0010_1234).unwrap();
         assert_eq!(r.devid, 1);
         assert_eq!(r.physical, 0x0010_1234);
+    }
+
+    /// A chunk with copies on devices 2 and 1 is read from the copy on the
+    /// device being read, not from the first stripe listed.
+    #[test]
+    fn resolve_uses_the_copy_on_the_local_device() {
+        let entry = build_sys_chunk_entry(
+            0x0010_0000,
+            0x10_0000,
+            2,
+            &[(2, 0x0100_0000), (1, 0x0200_0000)],
+        );
+        let mut map = ChunkMap::default();
+        map.set_local_devid(1);
+        map.parse_system_chunk_array(&entry, entry.len()).unwrap();
+        let r = map.resolve(0x0010_0010).unwrap();
+        assert_eq!((r.devid, r.physical), (1, 0x0200_0010));
+    }
+
+    /// A chunk with no copy on the device being read is refused, not read at
+    /// another device's offset.
+    #[test]
+    fn resolve_refuses_a_chunk_with_no_local_copy() {
+        let entry = build_sys_chunk_entry(0x0010_0000, 0x10_0000, 1, &[(2, 0x0100_0000)]);
+        let mut map = ChunkMap::default();
+        map.set_local_devid(1);
+        map.parse_system_chunk_array(&entry, entry.len()).unwrap();
+        assert_eq!(
+            map.resolve(0x0010_0010).unwrap_err(),
+            Error::UnsupportedProfile("prof_other_device")
+        );
     }
 
     #[test]

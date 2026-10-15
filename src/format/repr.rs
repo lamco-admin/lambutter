@@ -105,6 +105,9 @@ pub(crate) struct Superblock {
     pub(crate) bytes_used: u64,
     pub(crate) root_dir_objectid: u64,
     pub(crate) num_devices: u64,
+    /// `dev_item.devid`: The id of the device this superblock copy was read
+    /// from, which chunk stripes name.
+    pub(crate) devid: u64,
     pub(crate) sectorsize: u32,
     pub(crate) nodesize: u32,
     pub(crate) leafsize: u32,
@@ -155,6 +158,7 @@ impl Superblock {
             bytes_used: read_le_u64(buf, sb::OFFSET_BYTES_USED),
             root_dir_objectid: read_le_u64(buf, sb::OFFSET_ROOT_DIR_OBJECTID),
             num_devices: read_le_u64(buf, sb::OFFSET_NUM_DEVICES),
+            devid: read_le_u64(buf, sb::OFFSET_DEV_ITEM),
             sectorsize: read_le_u32(buf, sb::OFFSET_SECTORSIZE),
             nodesize: read_le_u32(buf, sb::OFFSET_NODESIZE),
             leafsize: read_le_u32(buf, sb::OFFSET_LEAFSIZE),

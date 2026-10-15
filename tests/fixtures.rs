@@ -487,3 +487,78 @@ fn opening_invalid_image_returns_error_not_panic() {
     let reader: &[u8] = &fake;
     let _ = Btrfs::open(reader, fake.len() as u64);
 }
+
+/// Read every file a multi-device fixture lists from device image `dev`,
+/// returning `(path, Ok(()) or the error)` and checking each read's hash.
+fn read_from_device(name: &str, dev: u8) -> Vec<(String, Result<(), lambutter::Error>)> {
+    let img = load_image(&format!("{name}.dev{dev}"));
+    let expected = load_expected(name);
+    let reader: &[u8] = &img;
+    let mut fs = Btrfs::open(reader, img.len() as u64).expect(&format!("open {name} dev{dev}"));
+    expected
+        .files
+        .iter()
+        .map(|(path, sha)| {
+            let p = Path::new(path.as_bytes()).expect("absolute path");
+            let got = fs.read_file(p).map(|bytes| {
+                assert_eq!(&sha256_hex(&bytes), sha, "{name} dev{dev}: {path} differs");
+            });
+            (path.clone(), got)
+        })
+        .collect()
+}
+
+/// A RAID1 filesystem across two devices, balanced from one, so each chunk's
+/// copies sit at different offsets. Either device alone reads every file from
+/// its own copy. 0.4.0 used a chunk's first stripe whatever its device, so
+/// device 1 was read at device 2's offsets.
+#[test]
+fn f13_raid1_reads_from_either_device() {
+    for dev in [1, 2] {
+        for (path, got) in read_from_device("f13_raid1_two_devices", dev) {
+            got.unwrap_or_else(|e| panic!("dev{dev}: {path}: {e:?}"));
+        }
+    }
+}
+
+/// Single data across two devices: A file is either read correctly from the
+/// device holding it or refused with `prof_other_device`, never read from the
+/// wrong device. 0.4.0 read the other device's offsets on this one.
+#[test]
+fn f14_single_data_on_the_other_device_is_refused() {
+    for dev in [1, 2] {
+        let (mut read, mut refused) = (0, 0);
+        for (path, got) in read_from_device("f14_single_two_devices", dev) {
+            match got {
+                Ok(()) => read += 1,
+                Err(lambutter::Error::UnsupportedProfile("prof_other_device")) => refused += 1,
+                Err(e) => panic!("dev{dev}: {path}: {e:?}"),
+            }
+        }
+        assert!(
+            read > 0 && refused > 0,
+            "dev{dev}: {read} read, {refused} refused"
+        );
+    }
+}
+
+/// fscrypt markers set by hand on an ordinary image: An extent with its
+/// encryption byte set and a directory entry with `BTRFS_FT_ENCRYPTED` are
+/// refused as `feat_encryption`. 0.4.0 returned the extent's bytes and listed
+/// the entry.
+#[test]
+fn f15_fscrypt_markers_are_refused() {
+    let img = load_image("f15_fscrypt_markers");
+    let expected = load_expected("f15_fscrypt_markers");
+    let reader: &[u8] = &img;
+    let mut fs = Btrfs::open(reader, img.len() as u64).expect("open f15");
+    let encrypted = Err(lambutter::Error::UnsupportedFeature("feat_encryption"));
+    let p = |s: &'static str| Path::new(s.as_bytes()).expect("absolute path");
+    assert_eq!(fs.read_file(p("/secret-extent.bin")).map(|_| ()), encrypted);
+    assert_eq!(fs.read_file(p("/secret-name.txt")).map(|_| ()), encrypted);
+    assert_eq!(fs.read_dir(p("/")).map(|_| ()), encrypted);
+    for (path, sha) in &expected.files {
+        let bytes = fs.read_file(Path::new(path.as_bytes()).unwrap()).unwrap();
+        assert_eq!(&sha256_hex(&bytes), sha, "{path}");
+    }
+}

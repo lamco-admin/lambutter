@@ -1,0 +1,6 @@
+{
+  "fixture": "f15_fscrypt_markers",
+  "files": {
+    "/plain.txt": "0e31b4805c16422e0fc62f097ac11c858e6ba3f9c49e5dffec2e1bfe51db6a09"
+  }
+}
