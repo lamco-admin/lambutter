@@ -137,11 +137,12 @@ discourages RAID5/6 for boot.
 even though `ls /boot/vmlinuz` from the running system shows the file.
 
 **Possible causes:**
-1. **Wrong subvolume.** Lambutter reads from the *active default
-   subvolume only*. If `/boot` lives in a non-default subvolume in
-   the FS hierarchy (rare), lambutter won't see it. Check `btrfs
-   subvolume get-default /` from Linux to see what lambutter thinks
-   the default is.
+1. **Wrong subvolume.** `open()` starts at the default subvolume and
+   crosses into any subvolume a path passes through, but it can't
+   reach a subvolume that's only mounted through fstab. Open that one
+   with `open_subvol_path` and the fstab `subvol=` path, or with
+   `open_subvol_id`. Check `btrfs subvolume get-default /` and
+   `btrfs subvolume list /` from Linux.
 2. **Snapper default redirect.** On openSUSE etc., the default subvol
    is `@/.snapshots/N/snapshot`, not `@`. Lambutter follows this
    redirect transparently at `open()` time. If the running system is
@@ -158,8 +159,8 @@ even though `ls /boot/vmlinuz` from the running system shows the file.
    lambutter version.
 
 **Resolution:**
-- Check `fs.default_subvol_objectid()` and compare against `btrfs
-  subvolume get-default /` from Linux. Should match.
+- Check `fs.subvolume()` and compare against `btrfs subvolume
+  get-default /` from Linux. Should match after `open()`.
 - Check the actual file path inside the default subvol — from Linux,
   `sudo btrfs subvolume snapshot -r / /mnt/active-default-snap; ls
   /mnt/active-default-snap/boot/`.
@@ -378,7 +379,7 @@ from CONSUMER-GUIDE.md §2.2 does this.
 
 ## 7. Edge cases that aren't errors but surprise consumers
 
-### 7.1 `default_subvol_objectid()` returns 5 even though the system has Snapper
+### 7.1 `subvolume()` returns 5 after `open()` even though the system has Snapper
 
 **Cause:** the system was installed without Snapper, OR Snapper was
 disabled and the default-subvolume DIR_ITEM was deleted, OR the user
@@ -391,19 +392,19 @@ subvolume get-default /` from Linux to confirm.
 
 ### 7.2 `read_dir` on `/boot/grub2/x86_64-efi` returns empty on openSUSE
 
-**Cause:** `/boot/grub2/x86_64-efi` is a *separate* btrfs subvolume on
-openSUSE. From within the active default subvol, the mount point
-appears as an empty directory (the nested subvol is only "filled in"
-when mounted by the kernel via fstab).
+**Cause:** `/boot/grub2/x86_64-efi` is a separate btrfs subvolume on
+openSUSE, a child of `@`, not of the snapshot the system boots. In
+the default subvolume the path is a plain empty mount point that only
+the fstab mount fills, so lambutter reads it as empty, the same as
+Linux does without that mount.
 
-**Resolution:** this is correct behavior — lambutter reads
-single-subvol-at-a-time. To read the contents of the nested subvol,
-you'd need to open the same `BlockRead` with a different lambutter
-instance after setting up the right subvol resolution (not currently
-in scope).
+**Resolution:** this is correct behavior. To read the subvolume,
+open it with `open_subvol_path` and the same path fstab gives as
+`subvol=`, here `/@/boot/grub2/x86_64-efi`.
 
-**Prevention:** when authoring per-distro support code, document that
-nested-subvol contents won't be visible.
+A subvolume that is nested at the path itself is different: `/boot`
+as a subvolume, or `@/var` read from inside `@`, is crossed into
+automatically, as a Linux mount shows it.
 
 ---
 

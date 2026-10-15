@@ -37,8 +37,8 @@ Lambutter is the btrfs counterpart to `ext4-view`. It is intentionally narrow in
 ### 2.2 Out of scope for v0.1.0
 
 - All write paths
-- Snapshot enumeration (only the active default subvolume is reachable)
-- Mid-path subvolume crossings (per BTRFS-FORMAT-READONLY-REFERENCE §13)
+- Snapshot enumeration (still out of scope; 0.4.0 opens a chosen subvolume by id or path instead)
+- Mid-path subvolume crossings (per BTRFS-FORMAT-READONLY-REFERENCE §13). **Implemented in 0.4.0:** an entry whose location is a `ROOT_ITEM` crosses into that subvolume when the root tree's `ROOT_REF` links it there, and otherwise reads as an empty directory, as Linux shows it
 - Csum verification on file *data* (verifying *metadata* csums is in scope; data-csum verification via `CSUM_TREE` is deferred — the cost/benefit analysis lives in the format reference open questions)
 - Free-space tree consumption — read-only paths must never consult it
 - Extended attributes (`XATTR_ITEM`)
@@ -50,10 +50,8 @@ Lambutter is the btrfs counterpart to `ext4-view`. It is intentionally narrow in
 
 Listed for context, not committed:
 
-- v0.2.0: snapshot enumeration; full subvolume traversal
-- v0.3.0: data-csum verification opt-in
-- v0.4.0: RAID0 / RAID10 read support
-- v0.5.0: hardware-accelerated CRC32C behind a feature flag
+- Shipped in 0.4.0: subvolume crossing, and opening a chosen subvolume by id or path
+- Still provisional: snapshot enumeration; data-csum verification opt-in; RAID0 / RAID10 read support; hardware-accelerated CRC32C behind a feature flag
 
 ## 3. Public API
 
@@ -77,7 +75,8 @@ pub trait BlockRead {
 /// Borrowed; lambutter does not own paths.
 pub struct Path<'a>(&'a [u8]);
 
-/// An inode within the active subvolume.
+/// A file, directory or symlink: the subvolume that holds it and its
+/// inode number there (0.4.0; earlier versions carried the number alone).
 pub struct Inode { /* opaque */ }
 
 /// A directory iterator entry.
@@ -110,10 +109,17 @@ impl<R: BlockRead> Btrfs<R> {
     /// non-seekable), the size is passed explicitly.
     pub fn open(reader: R, device_size_bytes: u64) -> Result<Self, Error>;
 
-    /// Subvolume objectid resolved as the default at mount time.
-    pub fn default_subvol_objectid(&self) -> u64;
+    /// Open at a chosen subvolume, as `subvolid=` and `subvol=` mount it
+    /// (0.4.0). The path is taken from the top level, and a path naming a
+    /// plain directory returns `Error::NotASubvolume`.
+    pub fn open_subvol_id(reader: R, device_size_bytes: u64, id: u64) -> Result<Self, Error>;
+    pub fn open_subvol_path(reader: R, device_size_bytes: u64, path: Path<'_>) -> Result<Self, Error>;
 
-    /// Resolve a path to an inode within the active subvolume.
+    /// Id of the subvolume this instance was opened at (0.4.0; replaces
+    /// `default_subvol_objectid`).
+    pub fn subvolume(&self) -> u64;
+
+    /// Resolve a path to an inode, crossing into nested subvolumes.
     pub fn resolve(&mut self, path: Path<'_>) -> Result<Inode, Error>;
 
     /// Read inode metadata.
@@ -189,6 +195,10 @@ pub enum Error {
 
     /// File was found but is not a regular file (directory, symlink, etc.).
     NotARegularFile,
+
+    /// `open_subvol_path` named something other than a subvolume root
+    /// (0.4.0).
+    NotASubvolume,
 
     /// Compressed-extent decode failed.
     BadCompression { algorithm: &'static str },
@@ -503,6 +513,8 @@ Tokens used in `Error` variants and trust-log integration. Stable across patch r
 | `csum_blake2` | `Error::UnsupportedChecksum` | blake2 csum type |
 | `csum_unknown` | `Error::UnsupportedChecksum` | csum type field holds no defined type |
 | `key_order` | `Error::CorruptBtree` | leaf keys not strictly ascending |
+| `dir_entry_location` | `Error::CorruptBtree` | a directory entry's location is neither an inode nor a subvolume root |
+| `root_ref_short` | `Error::CorruptBtree` | a `ROOT_REF` item is shorter than its header and name |
 | `separator_mismatch` | `Error::CorruptBtree` | an interior separator points at a leaf whose first key isn't past the search key |
 | `item_oob` | `Error::CorruptBtree` | item region overruns leaf bounds |
 | `child_count` | `Error::CorruptBtree` | interior node has 0 or > capacity children |

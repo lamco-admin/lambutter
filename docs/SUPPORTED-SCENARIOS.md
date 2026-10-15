@@ -113,21 +113,23 @@ SINGLE and DUP dominate.
 | Default = base `@` subvolume (no Snapper or pre-Snapper) | ✓ |
 | Default = `@/.snapshots/N/snapshot` via OID-6 DIR_ITEM "default" (Snapper) | ✓✓ |
 | Default = arbitrary subvolume picked by `btrfs subvolume set-default` post-install | ⊕ |
-| Caller-supplied default override (future API) | ✗ (not implemented in v0.3.x) |
+| A chosen subvolume by id or path, as `subvolid=` and `subvol=` mount it (`open_subvol_id`, `open_subvol_path`) | ✓ (fixture F12) |
 
-### 3.2 Reading from the active default
+### 3.2 Reading across subvolumes
 
 | Scenario | Status |
 |---|---|
-| Read a regular file in the active default subvolume | ✓✓ |
-| Read a symlink target in the active default subvolume | ✓✓ |
-| Read a directory listing in the active default subvolume | ✓ |
-| Read a file in a DIFFERENT subvolume (manual subvol pin) | ✗ — out of scope |
-| Cross-subvol references via ROOT_REF | ✗ — actively avoided |
+| Read a regular file in the opened subvolume | ✓✓ |
+| Read a symlink target in the opened subvolume | ✓✓ |
+| Read a directory listing in the opened subvolume | ✓ |
+| A path through an entry that names another subvolume (a `/boot` subvolume, `@` layouts from the top level, a nested `@/var`) | ✓ crosses into it when the root tree's `ROOT_REF` links it there (fixture F12) |
+| A snapshot's copy of a nested subvolume's entry | ✓ empty directory, as Linux shows it (fixture F12) |
+| A subvolume that's only mounted through fstab, not nested at that path | Open it with `open_subvol_path`, using the same path as the fstab `subvol=` |
 
-The reasoning: bootloaders need to read kernels from whichever
-subvolume the userland was booted into. That's the active default.
-Cross-subvol traversal complexity isn't justified for this use case.
+Paths behave as they do under a Linux mount of the opened subvolume.
+Before 0.4.0, lambutter treated a subvolume entry's id as an inode in the
+parent's tree, so a `/boot` subvolume resolved to the parent's root
+directory.
 
 ---
 
@@ -164,11 +166,12 @@ branch.
 | `NO_HOLES` | bit 9 | ✓ (zero-fill applied at read time) |
 | `METADATA_UUID` | bit 10 | ✓ (tolerated) |
 | `RAID1C34` | bit 11 | ✓ |
-| `ZONED` | bit 12 | ✗ — rejected via UnsupportedIncompat |
+| `ZONED` | bit 12 | ✗ — rejected, `UnsupportedFeature("feat_zoned")` |
 | `EXTENT_TREE_V2` | bit 13 | ✓ (tolerated) |
-| `RAID_STRIPE_TREE` | bit 14 | ✗ — rejected via UnsupportedIncompat |
-| `SIMPLE_QUOTA` | bit 15 | ✓ (tolerated) |
-| (future bits) | — | ⊕ (we reject any flag we don't recognize, defensively) |
+| `RAID_STRIPE_TREE` | bit 14 | ✗ — rejected, `UnsupportedFeature("feat_raid_stripe_tree")` |
+| `SIMPLE_QUOTA` | bit 16 | ✓ (tolerated) |
+| `REMAP_TREE` | bit 17 | ✗ — rejected, `UnsupportedFeature("feat_remap_tree")` (Linux 7.0, experimental) |
+| any other bit | — | ✗ — rejected, `UnsupportedFeature("feat_unknown_incompat")` |
 
 The pattern: we explicitly tolerate flags whose presence doesn't
 change anything about the read path, and reject flags that would
@@ -187,7 +190,6 @@ implementation, but where we don't have direct test evidence yet:
 | Very large directory (10000+ entries) | Medium | Synthetic fixture |
 | Pathologically nested symlinks (near `SYMLOOP_MAX`) | High — bounded by depth limit | Synthetic fixture |
 | Filesystem with many subvolumes (100+) | Medium | Snapper-rich Tumbleweed install |
-| Cross-leaf B-tree iteration on huge trees | Medium | Synthetic fixture |
 | Block size != 512 (4K-native disk) | High — `block_size` is queried at open | Live test on 4Kn disk |
 | Files at the maximum supported size (inode `size` field is u64) | High | Synthetic fixture if/when relevant |
 | Mixed BG (data + metadata in same block group) | High | Older mkfs.btrfs default |
@@ -201,9 +203,8 @@ For each: what users will see if they try.
 | Scenario | What happens | Recovery |
 |---|---|---|
 | Writing to the volume | API doesn't exist; can't be attempted | n/a |
-| ZONED btrfs (SMR drives, ZNS) | `Error::BadSuperblock(UnsupportedIncompat)` on `open()` | Use kernel btrfs driver |
+| ZONED btrfs (SMR drives, ZNS) | `Error::UnsupportedFeature("feat_zoned")` on `open()` | Use kernel btrfs driver |
 | Encrypted btrfs (`fscrypt`) | Will read encrypted bytes (returns garbage); not detected | n/a — btrfs fscrypt isn't widely deployed |
-| Reading from a snapshot OTHER than active default | Out of scope | Manually mount the snapshot in Linux, copy out via kernel driver |
 | Data-block CSUM verification | Not performed | Trust upstream; metadata CSUMs ARE verified |
 | Multi-device with primary device missing | Stripe-selection picks first listed device's blocks; if that device isn't available via the supplied `BlockRead`, reads fail with `Io` error | Provide a multi-device-aware `BlockRead` impl that falls back to remaining devices |
 
@@ -221,13 +222,12 @@ For each: what users will see if they try.
   the new default. (Holding a `Btrfs<R>` across a rollback won't —
   the in-memory state is fixed at open time.)
 - `/boot/grub2/x86_64-efi` and `/boot/grub2/i386-pc` are separate
-  subvolumes nested under `@/boot/grub2/`. From within
-  `@/.snapshots/1/snapshot`, those paths are EMPTY directories — the
-  nested subvolumes only exist when mounted via fstab. Lambutter
-  reads single-subvol-at-a-time and will see them empty. **This is
-  correct behavior** — when LamBoot reads `/boot/grub2/...`, it gets
-  what the running system would see if it `ls`'d the path without
-  the nested subvols mounted.
+  subvolumes under `@`, not under the snapshot. In
+  `@/.snapshots/1/snapshot` those paths are plain empty mount points,
+  filled only by the fstab mounts, so lambutter reads them as empty,
+  exactly as Linux does without those mounts. To read one, open it
+  with `open_subvol_path` and the same `subvol=` path fstab uses, such
+  as `/@/boot/grub2/x86_64-efi`.
 
 ### Tumbleweed (post-2025-11-13 grub2-bls installs)
 

@@ -203,11 +203,27 @@ A consumer that doesn't follow symlinks can't read `/boot/vmlinuz`.
 Reference production implementation:
 [`lamboot-core/src/fs_backend_btrfs.rs::resolve_following`](https://github.com/lamco-admin/lamboot/blob/main/lamboot-core/src/fs_backend_btrfs.rs).
 
+### 3.1 Subvolumes along the path
+
+Since 0.4.0, paths cross into a subvolume nested at that path, as a
+Linux mount shows it: from the top level, `/@/boot/vmlinuz` reads the
+kernel inside the `@` subvolume, and a `/boot` that is its own
+subvolume reads like a directory. An `Inode` names its subvolume, so
+keep the one `resolve` or a `DirEntry` gives you rather than building
+one; `DirEntry::inode` is the entry's own handle, crossing included.
+
+A subvolume that the running system only mounts through fstab isn't
+nested at its mount point, so reach it the way the kernel does. The
+kernel command line's `rootflags=subvol=@` maps to
+`Btrfs::open_subvol_path(reader, size, Path::new(b"/@")?)`, and
+`subvolid=257` to `Btrfs::open_subvol_id(reader, size, 257)`. Both
+take the path from the top level, whatever the default subvolume is.
+
 ---
 
 ## 4. The error-translation pattern
 
-`lambutter::Error` has 11 variants. Most consumers want to translate
+`lambutter::Error` has 13 variants. Most consumers want to translate
 to their own error type with stable log tokens. Lambutter ships each
 error with a `&'static str` token from a documented vocabulary
 (see `FEATURES.md` §3).
@@ -221,6 +237,7 @@ fn translate(err: lambutter::Error) -> MyError {
         NotFound                         => MyError::not_found(),
         NotARegularFile                  => MyError::is_directory_or_symlink(),
         NotASymlink                      => MyError::unsupported("not_a_symlink"),
+        NotASubvolume                    => MyError::unsupported("not_a_subvolume"),
         BadSuperblock(reason)            => MyError::corrupt(reason_token(reason)),
         UnsupportedFeature(token)        => MyError::unsupported_feature(token),
         UnsupportedProfile(token)        => MyError::unsupported_feature(token),
@@ -338,10 +355,12 @@ sensitive contexts like bootloaders):
 4. Bump your consumer's tag/version simultaneously (lockstep is
    easier than tracking compatibility windows).
 
-For consumers using `^0.1` semver match:
-- Within v0.3.x: API additions only. Your code should keep compiling.
-- The first breaking change will be v0.4.0 (or v1.0.0 if we go straight
-  to the stable line); expect to upgrade deliberately, not transparently.
+For consumers using a caret requirement (`lambutter = "0.4"`):
+- Within 0.4.x: bug fixes only, per the crate's version policy. New API
+  and new error tokens come in a minor bump.
+- 0.4.0 was a breaking release: `Inode` became opaque and carries its
+  subvolume, `DirEntry` gained `inode` and is `#[non_exhaustive]`, and
+  `Error` gained `NotASubvolume`. See `CHANGELOG.md`.
 
 ---
 
@@ -367,8 +386,7 @@ LamBoot's private development repository.
 
 ## 10. Getting help
 
-- Issues / questions: file in `lamco-admin/lambutter-dev` (the dev
-  repo) or `lamco-admin/lambutter` (post-publish public repo)
+- Issues / questions: [github.com/lamco-admin/lambutter](https://github.com/lamco-admin/lambutter/issues)
 - Specific scenarios not covered in `SUPPORTED-SCENARIOS.md`: see §9
   there for the info to capture
 - Discussion: lambutter is a small enough crate that direct issue
@@ -381,3 +399,5 @@ LamBoot's private development repository.
 
 - 2026-05-25: Initial consumer guide. Captures patterns proven in the
   LamBoot integration through VM 102.
+- 2026-10-14: 0.4.0. Subvolumes along the path (§3.1), the
+  `NotASubvolume` arm, and the 0.4 versioning notes.

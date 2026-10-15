@@ -64,6 +64,7 @@ choice. Update at every minor version bump.
 | OID-6 default-subvol DIR_ITEM `"default"` resolution | ✓ | The Snapper/openSUSE rollback path |
 | Fallback to superblock `root_dir_objectid` | ✓ | When DIR_ITEM "default" missing |
 | Fallback to `FS_TREE_OBJECTID` (= 5) | ✓ | Default-default subvolume |
+| Open a chosen subvolume by id or path, as `subvolid=` and `subvol=` mount it | ✓ | `Btrfs::open_subvol_id`, `Btrfs::open_subvol_path`; fixture F12 |
 | DIR_ITEM hash with seed 0xFFFF_FFFE | ✓ | `src/root_tree.rs::name_hash` — table-driven CRC32C with reflected seed |
 
 ### 1.5 FS tree (per-subvolume path resolution)
@@ -76,6 +77,8 @@ choice. Update at every minor version bump.
 | INODE_ITEM parse | ✓ | `src/format/repr.rs::InodeItem` |
 | Symlink target reading via `read_link` API | ✓ (v0.1.1) | `src/file.rs::read_link` |
 | Symlink-follow during path resolution | ✗ (deliberate) | Caller's responsibility — see CONSUMER-GUIDE §3 |
+| Cross into a subvolume a directory entry names (`ROOT_ITEM` location linked by `ROOT_REF`) | ✓ | `src/resolve.rs::entry_target`; paths and listings cross the way a Linux mount of the parent shows them (fixture F12) |
+| A snapshot's copy of a nested subvolume's entry | ✓ | Reads as an empty directory, as Linux shows it (fixture F12) |
 
 ### 1.6 EXTENT_DATA (file content)
 
@@ -90,8 +93,8 @@ choice. Update at every minor version bump.
 
 | Algorithm | Status | Crate | Feature gate | Binary cost |
 |---|---|---|---|---|
-| zstd | ✓ | `ruzstd 0.7` (`no_std`) | `zstd` (default) | ~30 KiB |
-| zlib | ✓ | `miniz_oxide 0.8` (`no_std`) | `zlib` | ~15 KiB |
+| zstd | ✓ | `ruzstd 0.9` (`no_std`) | `zstd` (default) | ~30 KiB |
+| zlib | ✓ | `miniz_oxide 0.9` (`no_std`) | `zlib` | ~15 KiB |
 | LZO (LZO1X-1) | ✓ (v0.1.1) | `lzokay 2.0` (`no_std`) | `lzo` | ~10 KiB |
 
 Output is capped at `MAX_DECOMPRESSED_EXTENT_BYTES = 16 MiB` for any
@@ -107,7 +110,9 @@ pub struct Btrfs<R: BlockRead> { /* opaque */ }
 
 impl<R: BlockRead> Btrfs<R> {
     pub fn open(reader: R, device_size_bytes: u64) -> Result<Self>;
-    pub fn default_subvol_objectid(&self) -> u64;
+    pub fn open_subvol_id(reader: R, device_size_bytes: u64, id: u64) -> Result<Self>;
+    pub fn open_subvol_path(reader: R, device_size_bytes: u64, path: Path<'_>) -> Result<Self>;
+    pub fn subvolume(&self) -> u64;
     pub fn resolve(&mut self, path: Path<'_>) -> Result<Inode>;
     pub fn metadata(&mut self, inode: &Inode) -> Result<Metadata>;
     pub fn read_file(&mut self, path: Path<'_>) -> Result<Vec<u8>>;
@@ -121,9 +126,11 @@ pub trait BlockRead {
     fn read_at(&mut self, offset_bytes: u64, buf: &mut [u8]) -> Result<(), Self::Error>;
 }
 
-pub struct Inode { pub objectid: u64 }
+pub struct Inode { /* opaque: subvolume and inode number */ }
+impl Inode { pub fn objectid(&self) -> u64; pub fn subvolume(&self) -> u64; }
 pub struct Metadata { pub size, pub nbytes, pub nlink, pub mode, pub uid, pub gid, pub generation }
-pub struct DirEntry { pub name: Vec<u8>, pub inode_number: u64, pub kind_byte: u8 }
+#[non_exhaustive]
+pub struct DirEntry { pub name: Vec<u8>, pub inode_number: u64, pub kind_byte: u8, pub inode: Inode }
 pub struct Path<'a> { /* opaque */ }
 pub enum Error { /* see error.rs */ }
 pub enum SuperblockReason { /* sub-enum of Error::BadSuperblock */ }
@@ -153,10 +160,11 @@ log-grep consumers. The full vocabulary:
 | `UnsupportedProfile(token)` | `raid0`, `raid10`, `raid5`, `raid6` | By design |
 | `UnsupportedChecksum(token)` | csum-type name | By design |
 | `CsumMismatch { logical }` | — | Disk corruption at that bytenr |
-| `CorruptBtree { token, logical }` | `key_order`, `separator_mismatch`, `item_region_overflow`, `child_count`, `depth_limit` | Disk corruption or malicious input |
+| `CorruptBtree { token, logical }` | `key_order`, `separator_mismatch`, `dir_entry_location`, `root_ref_short`, `item_region_overflow`, `child_count`, `depth_limit` | Disk corruption or malicious input |
 | `NotFound` | — | Caller should check; not always an error |
 | `NotARegularFile` | — | Path resolves to dir/symlink/special; caller should use the right API |
 | `NotASymlink` | — | `read_link` called on non-symlink |
+| `NotASubvolume` | — | `open_subvol_path` given a path that isn't a subvolume root, which a `subvol=` mount refuses too |
 | `BadCompression { algorithm }` | `comp_zlib`, `comp_lzo`, `comp_zstd` | Disk corruption or unsupported variant |
 | `OutOfMemory { token }` | allocation-site name | Caller should report and degrade gracefully |
 
@@ -164,15 +172,14 @@ log-grep consumers. The full vocabulary:
 
 ## 4. Non-features (deliberate omissions)
 
-These are *not* bugs and will not be implemented in the v0.3.x line:
+These are *not* bugs and will not be implemented in the 0.4.x line:
 
 | Item | Why deferred / rejected |
 |---|---|
 | Write support | Crate is read-only by construction — non-negotiable design property |
-| Snapshot enumeration | v0.2.0+ scope — current users only need the active default subvol |
-| Full subvolume traversal | v0.2.0+ scope |
+| Snapshot enumeration (listing every subvolume) | Not needed to boot: open the one a `subvol=` or `subvolid=` names |
 | Free-space-tree walk (FREE_SPACE_INFO) | Skipped — never needed for content reads |
-| Log-tree replay | Only relevant for crash-recovery write path |
+| Log-tree replay | Not needed for a consistent read: after a crash the last committed tree is intact, and lambutter reads it, as the kernel's `nologreplay` does. Changes fsynced after that commit are not visible |
 | UUID-tree access | Not needed for read path |
 | Quota-tree access | Not needed for read path |
 | Data-block CSUM_TREE verification | v0.2.0+ scope — metadata-block CSUMs ARE verified |
