@@ -125,7 +125,7 @@ computes:
 - the intra-block offset where the requested bytes begin in the aligned buffer
 
 Reference production implementation:
-[`lamboot-core/src/fs_backend_ext4.rs::compute_aligned_read`](https://github.com/lamco-admin/lamboot-dev/blob/main/lamboot-core/src/fs_backend_ext4.rs)
+[`lamboot-core/src/fs_backend_ext4.rs::compute_aligned_read`](https://github.com/lamco-admin/lamboot/blob/main/lamboot-core/src/fs_backend_ext4.rs)
 (shared by both ext4 and btrfs backends in LamBoot).
 
 ### 2.3 Example: `&[u8]` slice-backed (the simplest case)
@@ -201,7 +201,7 @@ uses `kernel-install` from systemd) stores kernels as symlink chains:
 A consumer that doesn't follow symlinks can't read `/boot/vmlinuz`.
 
 Reference production implementation:
-[`lamboot-core/src/fs_backend_btrfs.rs::resolve_following`](https://github.com/lamco-admin/lamboot-dev/blob/main/lamboot-core/src/fs_backend_btrfs.rs).
+[`lamboot-core/src/fs_backend_btrfs.rs::resolve_following`](https://github.com/lamco-admin/lamboot/blob/main/lamboot-core/src/fs_backend_btrfs.rs).
 
 ---
 
@@ -350,7 +350,7 @@ For consumers using `^0.1` semver match:
 The LamBoot UEFI bootloader uses lambutter as its native btrfs
 backend. Its consumer code is at:
 
-- [`lamboot-core/src/fs_backend_btrfs.rs`](https://github.com/lamco-admin/lamboot-dev/blob/main/lamboot-core/src/fs_backend_btrfs.rs)
+- [`lamboot-core/src/fs_backend_btrfs.rs`](https://github.com/lamco-admin/lamboot/blob/main/lamboot-core/src/fs_backend_btrfs.rs)
   (~300 lines) — `FsBackend` trait impl wrapping lambutter
 - BlockIO adapter for UEFI `EFI_BLOCK_IO_PROTOCOL`
 - Error translation table from `lambutter::Error` → `FsError`
@@ -360,9 +360,8 @@ backend. Its consumer code is at:
   before lambutter `open`s)
 
 The integration was validated end-to-end on a real openSUSE Tumbleweed
-install — see
-[the case study](https://github.com/lamco-admin/lamboot-dev/blob/main/docs/migration/VM-102-OPENSUSE-TUMBLEWEED-BIOS-TO-UEFI-CASE-STUDY.md)
-for the boot-trust.log audit trail.
+install. The case study with the boot-trust.log audit trail is kept in
+LamBoot's private development repository.
 
 ---
 

@@ -15,7 +15,7 @@ authors = [
     "Lamco Development LLC <office@lamco.io>",
 ]
 license = "MIT OR Apache-2.0"
-description = "no_std read-only btrfs reader for UEFI bootloaders and embedded contexts"
+description = "no_std read-only btrfs reader for UEFI bootloaders and embedded contexts, from Lamco Development LLC"
 repository = "https://github.com/lamco-admin/lambutter"
 homepage = "https://lamco.ai/products/lamboot/"
 documentation = "https://docs.rs/lambutter"

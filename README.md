@@ -4,6 +4,7 @@
 [![Docs.rs](https://docs.rs/lambutter/badge.svg)](https://docs.rs/lambutter)
 [![CI](https://github.com/lamco-admin/lambutter/actions/workflows/ci.yml/badge.svg)](https://github.com/lamco-admin/lambutter/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+[![Website](https://img.shields.io/badge/website-lamco.ai-blue.svg)](https://lamco.ai/products/lamboot/)
 
 **`no_std` read-only btrfs reader for UEFI bootloaders and embedded contexts.**
 
@@ -11,6 +12,11 @@ Lambutter is the btrfs counterpart to [`ext4-view`](https://github.com/nicholasb
 a pure-Rust, allocation-aware, read-only btrfs filesystem reader designed for
 contexts that cannot link `std` — UEFI applications, microcontrollers,
 bare-metal kernels, and recovery tooling.
+
+- **Website:** [LamBoot](https://lamco.ai/products/lamboot/), the bootloader lambutter was written for
+- **Documentation:** [docs.rs/lambutter](https://docs.rs/lambutter) and the [LamBoot docs](https://lamco.ai/products/lamboot/docs/)
+- **Repository:** [github.com/lamco-admin/lambutter](https://github.com/lamco-admin/lambutter)
+- **Company:** [Lamco Development LLC](https://lamco.ai/)
 
 ## Status
 
@@ -34,10 +40,23 @@ snapshot enumeration are tracked for v0.4.0+.
   redirect — 6 path reads (regular file 38 MB full-extent walk +
   inline 11 B + 1.2 KB normal, symlinks in both `/boot` and `/etc`)
   all sha256-byte-identical to kernel oracle
-- **Live embedded validation**: linked into [LamBoot](https://lamboot.dev)
+- **Live embedded validation**: linked into [LamBoot](https://lamco.ai/products/lamboot/)
   (Lamco's UEFI bootloader) as the native btrfs backend, booting
   openSUSE Tumbleweed end-to-end under live UEFI firmware with full
   trust-chain attribution.
+
+## Installation
+
+```sh
+cargo add lambutter
+```
+
+or in `Cargo.toml`, with every codec a `/boot` might use:
+
+```toml
+[dependencies]
+lambutter = { version = "0.3", features = ["zstd", "zlib", "lzo"] }
+```
 
 ## Use
 
@@ -116,16 +135,16 @@ enable all three: `features = ["zstd", "zlib", "lzo"]`.
 
 ## License
 
-Dual-licensed under MIT or Apache-2.0, at your option. See
+Dual-licensed under MIT or Apache-2.0, at your option, copyright Lamco
+Development LLC. See
 [`LICENSE-MIT`](https://github.com/lamco-admin/lambutter/blob/main/LICENSE-MIT) and [`LICENSE-APACHE`](https://github.com/lamco-admin/lambutter/blob/main/LICENSE-APACHE).
 
 ## Contributing
 
-Contributions welcome — particularly:
-
-- Additional fixture scenarios (`tests/fixtures/`)
-- Per-distro real-world validation across the wider ecosystem
-- v0.2.x scope items: data-block CSUM_TREE verification, snapshot
-  enumeration, full subvolume traversal
-
-See `docs/SPEC-LAMBUTTER.md` for design constraints before opening a PR.
+Issues and pull requests are welcome at
+[github.com/lamco-admin/lambutter](https://github.com/lamco-admin/lambutter).
+A change to the read path should come with a fixture:
+`tests/fixtures/scripts/build.sh` builds every image from a real
+`mkfs.btrfs` and kernel mount. Fixture scenarios and per-distro validation
+reports are especially useful. See `docs/SPEC-LAMBUTTER.md` for design
+constraints before opening a PR.

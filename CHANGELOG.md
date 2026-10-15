@@ -66,7 +66,7 @@ consumers." Two categories of work since v0.2.0:
 
 ### Added — Live embedded validation (the real-world milestone)
 
-Lambutter is now consumed by [LamBoot](https://lamboot.dev) (Lamco's
+Lambutter is now consumed by [LamBoot](https://lamco.ai/products/lamboot/) (Lamco's
 UEFI bootloader) as the native btrfs backend for kernel reads. The
 integration was validated end-to-end on openSUSE Tumbleweed VM 102 on
 `pve.a.lamco.io`:
@@ -88,9 +88,8 @@ Full audit trail in LamBoot's boot-trust.log includes
 `9110fc6ac140a57d34d80689345aa6398c1f99ef6948ea586e653eb389aeebe1`),
 and `image_loaded_native` events.
 
-Full case study including the 10 bugs found and fixed during this
-test:
-[`lamboot-dev/docs/migration/VM-102-OPENSUSE-TUMBLEWEED-BIOS-TO-UEFI-CASE-STUDY.md`](https://github.com/lamco-admin/lamboot-dev/blob/main/docs/migration/VM-102-OPENSUSE-TUMBLEWEED-BIOS-TO-UEFI-CASE-STUDY.md).
+The full case study, including the 10 bugs found and fixed during this
+test, is kept in LamBoot's private development repository.
 
 ### Bumped
 
