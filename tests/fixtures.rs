@@ -28,6 +28,9 @@ struct Expected {
     files: BTreeMap<String, String>,
     #[serde(default)]
     symlinks: BTreeMap<String, String>,
+    /// Directory path to the number of entries `read_dir` must return.
+    #[serde(default)]
+    dirs: BTreeMap<String, usize>,
 }
 
 fn fixture_dir() -> PathBuf {
@@ -292,6 +295,75 @@ fn read_file_at_chunked_matches_full_read() {
                 .expect("past EOF should return 0");
             assert_eq!(n, 0, "{fixture}: past-EOF read should return 0");
         }
+    }
+}
+
+/// Read `path` 64 KiB at a time through `read_file_at`.
+fn read_chunked(fs: &mut Btrfs<&[u8]>, path: &str) -> Vec<u8> {
+    let inode = fs.resolve(Path::new(path.as_bytes()).unwrap()).unwrap();
+    let mut out = Vec::new();
+    let mut chunk = vec![0u8; 65536];
+    loop {
+        let n = fs
+            .read_file_at(&inode, out.len() as u64, &mut chunk)
+            .unwrap_or_else(|e| panic!("read_file_at({path}) at {}: {e:?}", out.len()));
+        if n == 0 {
+            return out;
+        }
+        out.extend_from_slice(&chunk[..n]);
+    }
+}
+
+#[test]
+#[cfg(feature = "zstd")]
+fn f10_multi_leaf_reads_extents_and_entries_across_leaves() {
+    // 4 KiB nodes: the 8 MiB file's compressed extents and the entries
+    // directory's index (with gaps from deletions) both span leaves.
+    let img = load_image("f10_multi_leaf");
+    let expected = load_expected("f10_multi_leaf");
+
+    let reader: &[u8] = &img;
+    let mut fs = Btrfs::open(reader, img.len() as u64).expect("open f10");
+
+    for (path, expected_sha) in &expected.files {
+        let p = Path::new(path.as_bytes()).unwrap();
+        let whole = fs.read_file(p).expect(&format!("read {path}"));
+        assert_eq!(sha256_hex(&whole), *expected_sha, "read_file {path}");
+        assert_eq!(
+            sha256_hex(&read_chunked(&mut fs, path)),
+            *expected_sha,
+            "read_file_at {path}"
+        );
+    }
+    assert!(!expected.dirs.is_empty());
+    for (path, count) in &expected.dirs {
+        let entries = fs
+            .read_dir(Path::new(path.as_bytes()).unwrap())
+            .expect(&format!("read_dir {path}"));
+        assert_eq!(entries.len(), *count, "entries in {path}");
+    }
+}
+
+#[test]
+#[cfg(feature = "lzo")]
+fn f11_lzo_segments_reads_kernel_padded_segments() {
+    // Segment lengths vary, and some start with a zero byte at an offset
+    // that isn't a multiple of four.
+    let img = load_image("f11_lzo_segments");
+    let expected = load_expected("f11_lzo_segments");
+
+    let reader: &[u8] = &img;
+    let mut fs = Btrfs::open(reader, img.len() as u64).expect("open f11");
+
+    for (path, expected_sha) in &expected.files {
+        let p = Path::new(path.as_bytes()).unwrap();
+        let whole = fs.read_file(p).expect(&format!("read {path}"));
+        assert_eq!(sha256_hex(&whole), *expected_sha, "read_file {path}");
+        assert_eq!(
+            sha256_hex(&read_chunked(&mut fs, path)),
+            *expected_sha,
+            "read_file_at {path}"
+        );
     }
 }
 

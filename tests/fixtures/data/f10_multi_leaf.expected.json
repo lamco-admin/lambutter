@@ -1,0 +1,11 @@
+{
+  "fixture": "f10_multi_leaf",
+  "files": {
+    "/big.bin": "67e025e477279b746798bef0b13b2363ba0b5608bcff4ac398d1e4b0d8b3715d",
+    "/entries/e001.conf": "037dddf9ddf3fdd327ee48e0f0d69da276b9627e433c215212ee56ce6a404e91",
+    "/entries/e299.conf": "5c9a80729c4c1623c9fe42e867dbb3e329f9f60f12fa26681331401d7c962d34"
+  },
+  "dirs": {
+    "/entries": 150
+  }
+}

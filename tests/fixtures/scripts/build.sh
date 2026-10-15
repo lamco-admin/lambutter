@@ -279,6 +279,81 @@ build_f9_symlink_chain() {
 EOF
 }
 
+build_f10_multi_leaf() {
+    echo "=== F10 multi_leaf ==="
+    # 4 KiB nodes hold about fifty extent items, so the 8 MiB file's 64
+    # compressed extents and the entries directory's index both span leaves.
+    # Deleting every other entry leaves gaps in the index keys, which is
+    # what a search that stops at a leaf end trips over.
+    local content="$WORK/f10-content"
+    mkdir -p "$content/entries"
+    seq 1 1100000 | awk '{ printf "line %08d of the multi-leaf fixture\n", $1 }' \
+        | head -c 8388608 > "$content/big.bin" || true
+    truncate -s 8M "$content/big.bin"
+    for i in $(seq 1 300); do
+        printf 'title Entry %d\nversion 6.%d.0\nlinux /vmlinuz-6.%d.0\n' "$i" "$i" "$i" \
+            > "$content/entries/e$(printf %03d "$i").conf"
+    done
+
+    local img="$WORK/f10.img"
+    truncate -s 128M "$img"
+    mkfs.btrfs -q -f --nodesize 4096 --sectorsize 4096 "$img"
+    mkdir -p "$WORK/mnt"
+    sudo mount -o "loop,compress-force=zstd:3" "$img" "$WORK/mnt"
+    sudo cp -a "$content"/. "$WORK/mnt"/
+    sudo sync
+    for i in $(seq 2 2 300); do
+        sudo rm "$WORK/mnt/entries/e$(printf %03d "$i").conf"
+        rm "$content/entries/e$(printf %03d "$i").conf"
+    done
+    sudo sync
+    sudo umount "$WORK/mnt"
+
+    local sha_big sha_first sha_last
+    sha_big=$(sha256sum < "$content/big.bin" | awk '{print $1}')
+    sha_first=$(sha256sum < "$content/entries/e001.conf" | awk '{print $1}')
+    sha_last=$(sha256sum < "$content/entries/e299.conf" | awk '{print $1}')
+
+    compress_fixture "$img" "$DATA/f10_multi_leaf.img.zst"
+    cat > "$DATA/f10_multi_leaf.expected.json" <<EOF
+{
+  "fixture": "f10_multi_leaf",
+  "files": {
+    "/big.bin": "$sha_big",
+    "/entries/e001.conf": "$sha_first",
+    "/entries/e299.conf": "$sha_last"
+  },
+  "dirs": {
+    "/entries": 150
+  }
+}
+EOF
+}
+
+build_f11_lzo_segments() {
+    echo "=== F11 lzo_segments ==="
+    # Text from a small vocabulary compresses unevenly, so segment lengths
+    # vary sector to sector the way real files do. Some segment lengths
+    # start with a zero byte at an offset that isn't a multiple of four,
+    # which is where a decoder that treats every unaligned zero as padding
+    # goes wrong.
+    local content="$WORK/f11-content"
+    mkdir -p "$content"
+    awk 'BEGIN { srand(42); split("boot loader kernel initrd entry version linux options title machine", w);
+                 for (i = 0; i < 700000; i++) printf "%s%s", w[int(rand() * 10) + 1], (i % 9 == 8 ? "\n" : " ") }' \
+        | head -c 4194304 > "$content/words.txt" || true
+
+    local img="$WORK/f11.img"
+    mkfs_with_mount "$img" "$content" "compress-force=lzo"
+
+    local sha_words
+    sha_words=$(sha256sum < "$content/words.txt" | awk '{print $1}')
+
+    compress_fixture "$img" "$DATA/f11_lzo_segments.img.zst"
+    emit_expected_json "f11_lzo_segments" \
+        "/words.txt" "$sha_words"
+}
+
 # --------------------------------------------------------------------------
 # Driver
 # --------------------------------------------------------------------------
@@ -293,6 +368,8 @@ case "${1:-all}" in
     f5) build_f5_dup_metadata ;;
     f8) build_f8_sparse_no_holes ;;
     f9) build_f9_symlink_chain ;;
+    f10) build_f10_multi_leaf ;;
+    f11) build_f11_lzo_segments ;;
     all)
         build_f1_single_uncompressed
         build_f2_single_zstd
@@ -301,8 +378,10 @@ case "${1:-all}" in
         build_f5_dup_metadata
         build_f8_sparse_no_holes
         build_f9_symlink_chain
+        build_f10_multi_leaf
+        build_f11_lzo_segments
         ;;
-    *) echo "Usage: $0 [all|f1|f2|f3|f5|f8|f9]" >&2; exit 2 ;;
+    *) echo "Usage: $0 [all|f1|f2|f3|f4|f5|f8|f9|f10|f11]" >&2; exit 2 ;;
 esac
 
 echo "Done. Fixtures in $DATA/"
