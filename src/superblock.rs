@@ -46,6 +46,7 @@ enum CopyOutcome {
 /// picking the highest-generation valid copy.
 pub(crate) fn load<R: BlockRead>(reader: &mut R, device_size_bytes: u64) -> Result<Superblock> {
     let mut last_specific_reason: Option<SuperblockReason> = None;
+    let mut unsupported_csum: Option<&'static str> = None;
     let mut best: Option<Superblock> = None;
 
     for offset in SUPERBLOCK_OFFSETS {
@@ -69,10 +70,11 @@ pub(crate) fn load<R: BlockRead>(reader: &mut R, device_size_bytes: u64) -> Resu
                 last_specific_reason.get_or_insert(SuperblockReason::BadCsum);
             }
             CopyOutcome::UnsupportedCsumType(token) => {
-                // Surface this immediately — a wrong csum type at copy 0
-                // means we can't trust the others either; they share fsid
-                // and tooling.
-                return Err(Error::UnsupportedChecksum(token));
+                // Every copy of a real xxhash/sha256/blake2 filesystem says
+                // the same, so this surfaces below. A damaged csum_type field
+                // in one copy can't be verified either, so a valid crc32c copy
+                // elsewhere still wins.
+                unsupported_csum.get_or_insert(token);
             }
             CopyOutcome::UnsupportedIncompat(token) => {
                 return Err(Error::UnsupportedFeature(token));
@@ -86,9 +88,15 @@ pub(crate) fn load<R: BlockRead>(reader: &mut R, device_size_bytes: u64) -> Resu
         }
     }
 
-    best.ok_or_else(|| {
-        Error::BadSuperblock(last_specific_reason.unwrap_or(SuperblockReason::NoValidCopy))
-    })
+    if let Some(sb) = best {
+        return Ok(sb);
+    }
+    if let Some(token) = unsupported_csum {
+        return Err(Error::UnsupportedChecksum(token));
+    }
+    Err(Error::BadSuperblock(
+        last_specific_reason.unwrap_or(SuperblockReason::NoValidCopy),
+    ))
 }
 
 fn try_load_one<R: BlockRead>(reader: &mut R, offset: u64) -> CopyOutcome {
@@ -105,12 +113,8 @@ fn try_load_one<R: BlockRead>(reader: &mut R, offset: u64) -> CopyOutcome {
         return CopyOutcome::BadMagic;
     }
 
-    // Csum verification covers everything past the 32-byte csum field.
-    let body_offset = Superblock::body_offset_for_csum();
-    if !verify_crc32c(&buf[body_offset..], &sb.csum) {
-        return CopyOutcome::BadCsum;
-    }
-
+    // The superblock's own checksum uses csum_type, so the type comes first:
+    // a CRC32C check of an xxhash, sha256 or blake2 superblock always fails.
     match sb.csum_type {
         CSUM_TYPE_CRC32C => {}
         CSUM_TYPE_XXHASH => return CopyOutcome::UnsupportedCsumType("csum_xxhash"),
@@ -119,13 +123,25 @@ fn try_load_one<R: BlockRead>(reader: &mut R, offset: u64) -> CopyOutcome {
         _ => return CopyOutcome::UnsupportedCsumType("csum_unknown"),
     }
 
-    let incompat = IncompatFlags::from_bits_truncate(sb.incompat_flags);
-    let rejected = incompat.intersection(IncompatFlags::rejected_for_v0_1());
+    // Csum verification covers everything past the 32-byte csum field.
+    let body_offset = Superblock::body_offset_for_csum();
+    if !verify_crc32c(&buf[body_offset..], &sb.csum) {
+        return CopyOutcome::BadCsum;
+    }
+
+    if sb.incompat_flags & !IncompatFlags::all().bits() != 0 {
+        return CopyOutcome::UnsupportedIncompat("feat_unknown_incompat");
+    }
+    let rejected =
+        IncompatFlags::from_bits_retain(sb.incompat_flags).intersection(IncompatFlags::rejected());
     if rejected.contains(IncompatFlags::ZONED) {
         return CopyOutcome::UnsupportedIncompat("feat_zoned");
     }
     if rejected.contains(IncompatFlags::RAID_STRIPE_TREE) {
         return CopyOutcome::UnsupportedIncompat("feat_raid_stripe_tree");
+    }
+    if rejected.contains(IncompatFlags::REMAP_TREE) {
+        return CopyOutcome::UnsupportedIncompat("feat_remap_tree");
     }
 
     if !is_pow2_in_range(sb.sectorsize, MIN_SECTOR_SIZE, MAX_SECTOR_SIZE)
@@ -144,6 +160,8 @@ fn is_pow2_in_range(value: u32, min: u32, max: u32) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec::Vec;
+
     use super::*;
     use crate::{
         checksum::crc32c,
@@ -295,6 +313,101 @@ mod tests {
             load(&mut reader, device_size),
             Err(Error::UnsupportedFeature("feat_zoned"))
         ));
+    }
+
+    fn device_with_primary(sb_bytes: &[u8]) -> Vec<u8> {
+        let mut device = vec![0u8; SUPERBLOCK_PRIMARY_OFFSET as usize + SUPERBLOCK_SIZE];
+        device[SUPERBLOCK_PRIMARY_OFFSET as usize..].copy_from_slice(sb_bytes);
+        device
+    }
+
+    fn with_incompat(bits: u64) -> [u8; SUPERBLOCK_SIZE] {
+        let mut sb_bytes = build_minimal_valid_sb();
+        sb_bytes[188..196].copy_from_slice(&bits.to_le_bytes());
+        let body_csum = crc32c(&sb_bytes[CSUM_LEN..]);
+        sb_bytes[0..4].copy_from_slice(&body_csum.to_le_bytes());
+        sb_bytes
+    }
+
+    #[test]
+    fn rejects_unknown_incompat_bits() {
+        for bit in [15u32, 18, 40, 63] {
+            let device = device_with_primary(&with_incompat(1u64 << bit));
+            let mut reader: &[u8] = &device;
+            assert!(
+                matches!(
+                    load(&mut reader, device.len() as u64),
+                    Err(Error::UnsupportedFeature("feat_unknown_incompat"))
+                ),
+                "incompat bit {bit}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_remap_tree_incompat() {
+        let device = device_with_primary(&with_incompat(IncompatFlags::REMAP_TREE.bits()));
+        let mut reader: &[u8] = &device;
+        assert!(matches!(
+            load(&mut reader, device.len() as u64),
+            Err(Error::UnsupportedFeature("feat_remap_tree"))
+        ));
+    }
+
+    #[test]
+    fn accepts_known_tolerated_incompat_bits() {
+        let stock = IncompatFlags::MIXED_BACKREF
+            | IncompatFlags::BIG_METADATA
+            | IncompatFlags::EXTENDED_IREF
+            | IncompatFlags::SKINNY_METADATA
+            | IncompatFlags::NO_HOLES
+            | IncompatFlags::COMPRESS_ZSTD
+            | IncompatFlags::SIMPLE_QUOTA;
+        let device = device_with_primary(&with_incompat(stock.bits()));
+        let mut reader: &[u8] = &device;
+        assert!(load(&mut reader, device.len() as u64).is_ok());
+    }
+
+    #[test]
+    fn non_crc32c_superblock_reports_its_csum_type() {
+        // A real xxhash superblock carries an xxhash checksum, which never
+        // passes a CRC32C check, so the type has to be read first.
+        for (csum_type, token) in [
+            (CSUM_TYPE_XXHASH, "csum_xxhash"),
+            (CSUM_TYPE_SHA256, "csum_sha256"),
+            (CSUM_TYPE_BLAKE2, "csum_blake2"),
+        ] {
+            let mut sb_bytes = build_minimal_valid_sb();
+            sb_bytes[196..198].copy_from_slice(&csum_type.to_le_bytes());
+            sb_bytes[0..32].copy_from_slice(&[0x5A; 32]);
+            let device = device_with_primary(&sb_bytes);
+            let mut reader: &[u8] = &device;
+            assert!(
+                matches!(
+                    load(&mut reader, device.len() as u64),
+                    Err(Error::UnsupportedChecksum(t)) if t == token
+                ),
+                "{token}"
+            );
+        }
+    }
+
+    #[test]
+    fn damaged_csum_type_in_primary_falls_back_to_a_valid_copy() {
+        let mut primary = build_minimal_valid_sb();
+        primary[196..198].copy_from_slice(&CSUM_TYPE_SHA256.to_le_bytes());
+        let backup = build_minimal_valid_sb();
+
+        let secondary = SUPERBLOCK_OFFSETS[1] as usize;
+        let mut device = vec![0u8; secondary + SUPERBLOCK_SIZE];
+        device[SUPERBLOCK_PRIMARY_OFFSET as usize
+            ..SUPERBLOCK_PRIMARY_OFFSET as usize + SUPERBLOCK_SIZE]
+            .copy_from_slice(&primary);
+        device[secondary..].copy_from_slice(&backup);
+
+        let mut reader: &[u8] = &device;
+        let sb = load(&mut reader, device.len() as u64).expect("backup copy is valid");
+        assert_eq!(sb.csum_type, CSUM_TYPE_CRC32C);
     }
 
     #[test]

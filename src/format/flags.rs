@@ -38,16 +38,21 @@ bitflags! {
         const EXTENT_TREE_V2      = 1 << 13;
         const RAID_STRIPE_TREE    = 1 << 14;
         const SIMPLE_QUOTA        = 1 << 16;
+        const REMAP_TREE          = 1 << 17;
     }
 }
 
 impl IncompatFlags {
-    /// Bits the crate refuses to mount under in v0.1.0.
-    /// `ZONED` requires zoned-block-device awareness; `RAID_STRIPE_TREE`
-    /// changes how chunk addressing works; both are out of scope.
+    /// Known bits the crate refuses to mount under. `ZONED` requires
+    /// zoned-block-device awareness; `RAID_STRIPE_TREE` changes how chunk
+    /// addressing works; `REMAP_TREE` (Linux 7.0, experimental) can move a
+    /// block group's contents elsewhere and leave its chunk with no stripes, so
+    /// the chunk map alone no longer finds the data.
     /// spec: BTRFS-FORMAT-READONLY-REFERENCE §11
-    pub(crate) const fn rejected_for_v0_1() -> Self {
-        Self::ZONED.union(Self::RAID_STRIPE_TREE)
+    pub(crate) const fn rejected() -> Self {
+        Self::ZONED
+            .union(Self::RAID_STRIPE_TREE)
+            .union(Self::REMAP_TREE)
     }
 }
 
@@ -77,10 +82,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rejected_v0_1_covers_zoned_and_raid_stripe_tree() {
-        let r = IncompatFlags::rejected_for_v0_1();
+    fn rejected_covers_zoned_raid_stripe_tree_and_remap_tree() {
+        let r = IncompatFlags::rejected();
         assert!(r.contains(IncompatFlags::ZONED));
         assert!(r.contains(IncompatFlags::RAID_STRIPE_TREE));
+        assert!(r.contains(IncompatFlags::REMAP_TREE));
         assert!(!r.contains(IncompatFlags::COMPRESS_ZSTD));
         assert!(!r.contains(IncompatFlags::SKINNY_METADATA));
     }
