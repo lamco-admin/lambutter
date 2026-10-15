@@ -27,6 +27,14 @@ use crate::{
     inode::Metadata,
 };
 
+/// The two block sizes a file read needs from the superblock: `nodesize` to
+/// walk the tree, `sectorsize` to decode LZO extents.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Geometry {
+    pub(crate) nodesize: u32,
+    pub(crate) sectorsize: u32,
+}
+
 /// Read an inode's metadata.
 pub(crate) fn read_metadata<R: BlockRead>(
     reader: &mut R,
@@ -70,10 +78,14 @@ pub(crate) fn read_metadata<R: BlockRead>(
 pub(crate) fn read_link<R: BlockRead>(
     reader: &mut R,
     chunk_map: &ChunkMap,
-    nodesize: u32,
+    geometry: Geometry,
     fs_tree_root: u64,
     objectid: u64,
 ) -> Result<Vec<u8>> {
+    let Geometry {
+        nodesize,
+        sectorsize,
+    } = geometry;
     let metadata = read_metadata(reader, chunk_map, nodesize, fs_tree_root, objectid)?;
     if !metadata.is_symlink() {
         return Err(Error::NotASymlink);
@@ -109,7 +121,7 @@ pub(crate) fn read_link<R: BlockRead>(
     if header.compression == COMPRESS_NONE {
         out.extend_from_slice(payload);
     } else {
-        compression::decode(header.compression, payload, &mut out)?;
+        compression::decode(header.compression, payload, &mut out, sectorsize)?;
     }
     // Use the symlink inode's `size` field as the canonical length;
     // the inline-extent payload may be padded out to the leaf-item
@@ -128,10 +140,14 @@ pub(crate) fn read_link<R: BlockRead>(
 pub(crate) fn read_file<R: BlockRead>(
     reader: &mut R,
     chunk_map: &ChunkMap,
-    nodesize: u32,
+    geometry: Geometry,
     fs_tree_root: u64,
     objectid: u64,
 ) -> Result<Vec<u8>> {
+    let Geometry {
+        nodesize,
+        sectorsize,
+    } = geometry;
     let metadata = read_metadata(reader, chunk_map, nodesize, fs_tree_root, objectid)?;
     if !metadata.is_file() {
         return Err(Error::NotARegularFile);
@@ -196,7 +212,7 @@ pub(crate) fn read_file<R: BlockRead>(
             }
 
             let data = leaf.leaf_item_data(item)?;
-            apply_extent(reader, chunk_map, &mut out, data, file_size)?;
+            apply_extent(reader, chunk_map, sectorsize, &mut out, data, file_size)?;
 
             next_target = DiskKey {
                 objectid,
@@ -227,7 +243,7 @@ pub(crate) fn read_file<R: BlockRead>(
 pub(crate) fn read_file_at<R: BlockRead>(
     reader: &mut R,
     chunk_map: &ChunkMap,
-    nodesize: u32,
+    geometry: Geometry,
     fs_tree_root: u64,
     objectid: u64,
     offset: u64,
@@ -236,6 +252,10 @@ pub(crate) fn read_file_at<R: BlockRead>(
     if buf.is_empty() {
         return Ok(0);
     }
+    let Geometry {
+        nodesize,
+        sectorsize,
+    } = geometry;
     let metadata = read_metadata(reader, chunk_map, nodesize, fs_tree_root, objectid)?;
     if !metadata.is_file() {
         return Err(Error::NotARegularFile);
@@ -310,6 +330,7 @@ pub(crate) fn read_file_at<R: BlockRead>(
             copy_extent_slice(
                 reader,
                 chunk_map,
+                sectorsize,
                 data,
                 in_extent_offset,
                 &mut buf[written..written + want_here],
@@ -374,6 +395,7 @@ fn extent_logical_length(data: &[u8]) -> Result<u64> {
 fn copy_extent_slice<R: BlockRead>(
     reader: &mut R,
     chunk_map: &ChunkMap,
+    sectorsize: u32,
     data: &[u8],
     in_extent_offset: u64,
     dst: &mut [u8],
@@ -390,7 +412,7 @@ fn copy_extent_slice<R: BlockRead>(
                 payload
             } else {
                 let mut v = Vec::new();
-                compression::decode(header.compression, payload, &mut v)?;
+                compression::decode(header.compression, payload, &mut v, sectorsize)?;
                 decoded = v;
                 &decoded[..]
             };
@@ -451,7 +473,7 @@ fn copy_extent_slice<R: BlockRead>(
                 compressed.resize(disk_size, 0);
                 read_through_chunks(reader, chunk_map, regular.disk_bytenr, &mut compressed)?;
                 let mut decoded = Vec::new();
-                compression::decode(header.compression, &compressed, &mut decoded)?;
+                compression::decode(header.compression, &compressed, &mut decoded, sectorsize)?;
                 let off: usize = (regular.offset + in_extent_offset)
                     .try_into()
                     .map_err(|_| Error::OutOfMemory {
@@ -495,6 +517,7 @@ fn finalize(mut out: Vec<u8>, expected_size: u64) -> Result<Vec<u8>> {
 fn apply_extent<R: BlockRead>(
     reader: &mut R,
     chunk_map: &ChunkMap,
+    sectorsize: u32,
     out: &mut Vec<u8>,
     data: &[u8],
     file_size: u64,
@@ -515,7 +538,7 @@ fn apply_extent<R: BlockRead>(
                 out.extend_from_slice(&payload[..take]);
             } else {
                 let mut decoded = Vec::new();
-                compression::decode(header.compression, payload, &mut decoded)?;
+                compression::decode(header.compression, payload, &mut decoded, sectorsize)?;
                 let take = (header.ram_bytes as usize).min(decoded.len());
                 out.extend_from_slice(&decoded[..take]);
             }
@@ -590,7 +613,7 @@ fn apply_extent<R: BlockRead>(
                 compressed.resize(disk_size, 0);
                 read_through_chunks(reader, chunk_map, regular.disk_bytenr, &mut compressed)?;
                 let mut decoded = Vec::new();
-                compression::decode(header.compression, &compressed, &mut decoded)?;
+                compression::decode(header.compression, &compressed, &mut decoded, sectorsize)?;
                 // Slice [offset..offset+emit] from decoded; offset is into
                 // the decompressed (logical) extent.
                 let off: usize = regular.offset.try_into().map_err(|_| Error::OutOfMemory {

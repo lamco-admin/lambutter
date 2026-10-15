@@ -35,15 +35,16 @@ pub(crate) use crate::format::constants::MAX_DECOMPRESSED_EXTENT_BYTES;
 
 /// Decompress `src` into `dst`, dispatching on `algorithm`. The output
 /// buffer is appended to (not replaced); callers that want exact-size
-/// behavior should clear `dst` before calling.
-pub(crate) fn decode(algorithm: u8, src: &[u8], dst: &mut Vec<u8>) -> Result<()> {
+/// behavior should clear `dst` before calling. `sectorsize` is the
+/// filesystem's; LZO frames its data per sector.
+pub(crate) fn decode(algorithm: u8, src: &[u8], dst: &mut Vec<u8>, sectorsize: u32) -> Result<()> {
     match algorithm {
         COMPRESS_NONE => {
             dst.extend_from_slice(src);
             Ok(())
         }
         COMPRESS_ZLIB => decode_zlib(src, dst),
-        COMPRESS_LZO => decode_lzo(src, dst),
+        COMPRESS_LZO => decode_lzo(src, dst, sectorsize as usize),
         COMPRESS_ZSTD => decode_zstd(src, dst),
         _ => Err(Error::BadCompression {
             algorithm: "comp_unknown",
@@ -74,11 +75,11 @@ fn decode_zstd(_src: &[u8], _dst: &mut Vec<u8>) -> Result<()> {
 }
 
 #[cfg(feature = "lzo")]
-fn decode_lzo(src: &[u8], dst: &mut Vec<u8>) -> Result<()> {
-    lzo::decode(src, dst)
+fn decode_lzo(src: &[u8], dst: &mut Vec<u8>, sectorsize: usize) -> Result<()> {
+    lzo::decode(src, dst, sectorsize)
 }
 #[cfg(not(feature = "lzo"))]
-fn decode_lzo(_src: &[u8], _dst: &mut Vec<u8>) -> Result<()> {
+fn decode_lzo(_src: &[u8], _dst: &mut Vec<u8>, _sectorsize: usize) -> Result<()> {
     Err(Error::BadCompression {
         algorithm: "comp_lzo",
     })

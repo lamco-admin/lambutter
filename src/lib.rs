@@ -68,7 +68,7 @@ pub mod __fuzz_internals {
     /// Drive the compression dispatcher directly with arbitrary algorithm
     /// + payload bytes. Used by `fuzz_compressed_extent`.
     pub fn decode(algorithm: u8, src: &[u8], dst: &mut Vec<u8>) -> crate::Result<()> {
-        crate::compression::decode(algorithm, src, dst)
+        crate::compression::decode(algorithm, src, dst, 4096)
     }
 
     /// Drive the chunk-map's system-array parser directly with arbitrary
@@ -93,7 +93,7 @@ pub mod __fuzz_internals {
 pub struct Btrfs<R: BlockRead> {
     reader: R,
     chunk_map: ChunkMap,
-    nodesize: u32,
+    geometry: file::Geometry,
     fs_tree_root: u64,
     /// Subvolume objectid that was selected as the active default. Useful
     /// for diagnostics; the FS tree root is what actual reads go through.
@@ -134,7 +134,10 @@ impl<R: BlockRead> Btrfs<R> {
         Ok(Self {
             reader,
             chunk_map,
-            nodesize: sb.nodesize,
+            geometry: file::Geometry {
+                nodesize: sb.nodesize,
+                sectorsize: sb.sectorsize,
+            },
             fs_tree_root,
             default_subvol_objectid,
         })
@@ -151,7 +154,7 @@ impl<R: BlockRead> Btrfs<R> {
         let objectid = resolve::resolve_path(
             &mut self.reader,
             &self.chunk_map,
-            self.nodesize,
+            self.geometry.nodesize,
             self.fs_tree_root,
             path,
         )?;
@@ -163,7 +166,7 @@ impl<R: BlockRead> Btrfs<R> {
         file::read_metadata(
             &mut self.reader,
             &self.chunk_map,
-            self.nodesize,
+            self.geometry.nodesize,
             self.fs_tree_root,
             inode.objectid,
         )
@@ -179,7 +182,7 @@ impl<R: BlockRead> Btrfs<R> {
         file::read_file(
             &mut self.reader,
             &self.chunk_map,
-            self.nodesize,
+            self.geometry,
             self.fs_tree_root,
             inode.objectid,
         )
@@ -197,7 +200,7 @@ impl<R: BlockRead> Btrfs<R> {
         file::read_file_at(
             &mut self.reader,
             &self.chunk_map,
-            self.nodesize,
+            self.geometry,
             self.fs_tree_root,
             inode.objectid,
             offset,
@@ -213,7 +216,7 @@ impl<R: BlockRead> Btrfs<R> {
         file::read_link(
             &mut self.reader,
             &self.chunk_map,
-            self.nodesize,
+            self.geometry,
             self.fs_tree_root,
             inode.objectid,
         )
@@ -225,7 +228,7 @@ impl<R: BlockRead> Btrfs<R> {
         dir::read_dir(
             &mut self.reader,
             &self.chunk_map,
-            self.nodesize,
+            self.geometry.nodesize,
             self.fs_tree_root,
             inode.objectid,
         )
