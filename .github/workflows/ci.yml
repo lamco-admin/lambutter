@@ -8,10 +8,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Weekly, so new toolchain lints and advisories surface without a push.
+  schedule:
+    - cron: "41 5 * * 1"
 
 env:
   CARGO_TERM_COLOR: always
-  MSRV: "1.85"
+  MSRV: "1.87"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

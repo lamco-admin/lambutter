@@ -15,7 +15,7 @@
 
 use alloc::vec::Vec;
 
-use ruzstd::{io::Read, StreamingDecoder};
+use ruzstd::{decoding::StreamingDecoder, io::Read};
 
 use super::MAX_DECOMPRESSED_EXTENT_BYTES;
 use crate::error::{Error, Result};

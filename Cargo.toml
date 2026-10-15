@@ -22,7 +22,7 @@ documentation = "https://docs.rs/lambutter"
 readme = "README.md"
 keywords = ["btrfs", "filesystem", "no_std", "uefi", "bootloader"]
 categories = ["filesystem", "embedded", "no-std"]
-rust-version = "1.85"
+rust-version = "1.87"
 include = [
     "src/**/*.rs",
     "LICENSE-APACHE",
@@ -40,13 +40,13 @@ lzo = ["dep:lzokay"]
 [dependencies]
 bitflags = { version = "2.6", default-features = false }
 crc = { version = "3.2", default-features = false }
-miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"], optional = true }
-ruzstd = { version = "0.7", default-features = false, optional = true }
+miniz_oxide = { version = "0.9.1", default-features = false, features = ["with-alloc"], optional = true }
+ruzstd = { version = "0.9.1", default-features = false, optional = true }
 lzokay = { version = "2.0", default-features = false, features = ["decompress", "alloc"], optional = true }
 
 [dev-dependencies]
 anyhow = "1"
-sha2 = "0.10"
+sha2 = "0.11"
 zstd = "0.13"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
